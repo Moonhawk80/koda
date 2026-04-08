@@ -3,8 +3,9 @@
   "language": "en",
   "hotkey_dictation": "ctrl+space",
   "hotkey_command": "ctrl+shift+.",
+  "hotkey_correction": "ctrl+shift+z",
   "hotkey_mode": "hold",
-  "mic_device": null,
+  "mic_device": 0,
   "sound_effects": true,
   "notifications": false,
   "noise_reduction": false,
@@ -16,5 +17,13 @@
   "vad": {
     "enabled": true,
     "silence_timeout_ms": 1500
+  },
+  "wake_word": {
+    "enabled": true,
+    "phrase": "hey koda"
+  },
+  "llm_polish": {
+    "enabled": true,
+    "model": "phi3:mini"
   }
 }

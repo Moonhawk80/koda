@@ -41,6 +41,8 @@ recording_mode = "dictation"
 last_transcription = None
 wake_word_active = False
 wake_word_thread = None
+wake_buffer = []  # rolling buffer for wake word detection
+wake_buffer_lock = threading.Lock()
 
 
 # ============================================================
@@ -120,11 +122,17 @@ def notify(message, title="Koda"):
 # MODEL
 # ============================================================
 
+wake_model = None  # Separate tiny model for wake word detection
+
+
 def load_whisper_model():
-    global model
+    global model, wake_model
     from faster_whisper import WhisperModel
     model_size = config.get("model_size", "base")
     model = WhisperModel(model_size, device="cpu", compute_type="int8")
+    # Load tiny model for fast wake word detection
+    if config.get("wake_word", {}).get("enabled", False):
+        wake_model = WhisperModel("tiny", device="cpu", compute_type="int8")
 
 
 # ============================================================
@@ -225,10 +233,9 @@ def stop_wake_word_listener():
 
 
 def _wake_word_loop():
-    """Continuously listen for the wake word using short Whisper checks."""
+    """Continuously listen for the wake word using the shared audio buffer."""
     global wake_word_active
     wake_phrase = config.get("wake_word", {}).get("phrase", "hey koda").lower()
-    check_interval = 2.0  # seconds of audio to check
     energy_threshold = 0.008
 
     while wake_word_active:
@@ -236,45 +243,48 @@ def _wake_word_loop():
             time.sleep(0.5)
             continue
 
-        # Record a short snippet
-        try:
-            audio = sd.rec(
-                int(check_interval * 16000),
-                samplerate=16000,
-                channels=1,
-                dtype="float32",
-                device=config.get("mic_device"),
-            )
-            sd.wait()
-        except Exception:
-            time.sleep(1)
+        # Wait for audio to accumulate
+        time.sleep(1.5)
+
+        if not wake_word_active or recording:
             continue
 
-        audio = audio.flatten()
+        # Grab audio from the shared buffer
+        with wake_buffer_lock:
+            if not wake_buffer:
+                continue
+            audio = np.concatenate(wake_buffer, axis=0).flatten()
+            wake_buffer.clear()
 
-        # Skip if too quiet (no speech)
+        # Skip if too quiet
         rms = np.sqrt(np.mean(audio ** 2))
         if rms < energy_threshold:
             continue
 
-        # Quick transcription to check for wake word
+        # Quick transcription with tiny model + prompt hint
         try:
-            segments, _ = model.transcribe(
-                audio, beam_size=1, language=config.get("language", "en"),
-                vad_filter=True,
+            wm = wake_model if wake_model else model
+            segments, _ = wm.transcribe(
+                audio, beam_size=5, language=config.get("language", "en"),
+                vad_filter=False, initial_prompt="Hey Koda",
             )
             text = " ".join(seg.text for seg in segments).strip().lower()
 
-            # Fuzzy match for the wake phrase
             if _matches_wake_phrase(text, wake_phrase):
                 play_wakeword_sound()
                 update_tray("#3498db", "Koda: Listening...")
-                time.sleep(0.3)
-                # Start recording in dictation mode
-                start_recording("dictation")
+                time.sleep(0.5)
+                # Clear buffer before recording so old audio doesn't re-trigger
+                with wake_buffer_lock:
+                    wake_buffer.clear()
+                start_recording("dictation", force_vad=True)
                 # Wait for recording to finish
                 while recording:
                     time.sleep(0.1)
+                # Cooldown after recording to prevent re-trigger
+                with wake_buffer_lock:
+                    wake_buffer.clear()
+                time.sleep(2)
         except Exception:
             pass
 
@@ -308,9 +318,17 @@ def _matches_wake_phrase(text, phrase):
 def audio_callback(indata, frames, time_info, status):
     if recording:
         audio_chunks.append(indata.copy())
+    # Always feed wake word buffer (when not recording)
+    if wake_word_active and not recording:
+        with wake_buffer_lock:
+            wake_buffer.append(indata.copy())
+            # Keep only last 3 seconds (16000 samples/sec, ~31 chunks/sec at 512 samples)
+            max_chunks = int(3 * 16000 / frames) if frames > 0 else 100
+            while len(wake_buffer) > max_chunks:
+                wake_buffer.pop(0)
 
 
-def start_recording(mode="dictation"):
+def start_recording(mode="dictation", force_vad=False):
     global recording, audio_chunks, last_speech_time, recording_mode
     if recording:
         return
@@ -323,7 +341,8 @@ def start_recording(mode="dictation"):
     label = "Dictation" if mode == "dictation" else "Command"
     update_tray("#e74c3c", f"Koda: Recording ({label})...")
 
-    if config.get("hotkey_mode", "hold") == "toggle":
+    # Use VAD auto-stop in toggle mode OR when triggered by wake word
+    if force_vad or config.get("hotkey_mode", "hold") == "toggle":
         threading.Thread(target=vad_monitor_thread, daemon=True).start()
 
 
