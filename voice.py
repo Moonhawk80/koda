@@ -60,31 +60,32 @@ def create_icon(color="gray"):
 # SOUND EFFECTS
 # ============================================================
 
+SOUNDS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sounds")
+
+
+def _play_wav(filename):
+    """Play a .wav file asynchronously."""
+    filepath = os.path.join(SOUNDS_DIR, filename)
+    if os.path.exists(filepath):
+        winsound.PlaySound(filepath, winsound.SND_FILENAME | winsound.SND_ASYNC | winsound.SND_NODEFAULT)
+
+
 def play_start_sound():
-    """Short ascending beep — recording started."""
+    """Rising chime — recording started."""
     if config.get("sound_effects", True):
-        threading.Thread(
-            target=lambda: winsound.Beep(600, 100),
-            daemon=True,
-        ).start()
+        _play_wav("start.wav")
 
 
 def play_stop_sound():
-    """Short descending beep — recording stopped."""
+    """Soft note — recording stopped, processing."""
     if config.get("sound_effects", True):
-        threading.Thread(
-            target=lambda: (winsound.Beep(600, 80), winsound.Beep(400, 80)),
-            daemon=True,
-        ).start()
+        _play_wav("stop.wav")
 
 
 def play_success_sound():
-    """Quick ascending tone — text pasted."""
+    """Ascending chime — text pasted."""
     if config.get("sound_effects", True):
-        threading.Thread(
-            target=lambda: (winsound.Beep(500, 60), winsound.Beep(800, 60)),
-            daemon=True,
-        ).start()
+        _play_wav("success.wav")
 
 
 # ============================================================
@@ -284,46 +285,61 @@ def _transcribe_and_paste():
 # HOTKEYS
 # ============================================================
 
+def _get_trigger_key(hotkey_str):
+    """Get the last key in a combo for release detection. e.g. 'ctrl+space' -> 'space'."""
+    return hotkey_str.split("+")[-1].strip()
+
+
+def _register_hotkey(hotkey_str, on_press, on_release=None):
+    """Register a hotkey that works for both single keys and combos."""
+    parts = [p.strip() for p in hotkey_str.split("+")]
+    trigger_key = parts[-1]
+    modifiers = parts[:-1]
+
+    if modifiers:
+        # Combo key: use add_hotkey for press, on_release_key for the trigger key
+        keyboard.add_hotkey(hotkey_str, on_press, suppress=False)
+        if on_release:
+            keyboard.on_release_key(trigger_key, lambda e: on_release())
+    else:
+        # Single key
+        keyboard.on_press_key(trigger_key, lambda e: on_press())
+        if on_release:
+            keyboard.on_release_key(trigger_key, lambda e: on_release())
+
+
 def setup_hotkeys():
     """Register global hotkeys based on config."""
-    hotkey_dict = config.get("hotkey_dictation", "f9")
-    hotkey_cmd = config.get("hotkey_command", "f10")
+    hotkey_dict = config.get("hotkey_dictation", "ctrl+space")
+    hotkey_cmd = config.get("hotkey_command", "ctrl+shift+.")
     mode = config.get("hotkey_mode", "hold")
 
     if mode == "hold":
-        # Hold-to-talk: press starts, release stops
-        keyboard.on_press_key(
+        _register_hotkey(
             hotkey_dict,
-            lambda e: start_recording("dictation"),
+            on_press=lambda: start_recording("dictation"),
+            on_release=lambda: threading.Thread(target=stop_recording, daemon=True).start(),
         )
-        keyboard.on_release_key(
-            hotkey_dict,
-            lambda e: threading.Thread(target=stop_recording, daemon=True).start(),
-        )
-        keyboard.on_press_key(
+        _register_hotkey(
             hotkey_cmd,
-            lambda e: start_recording("command"),
-        )
-        keyboard.on_release_key(
-            hotkey_cmd,
-            lambda e: threading.Thread(target=stop_recording, daemon=True).start(),
+            on_press=lambda: start_recording("command"),
+            on_release=lambda: threading.Thread(target=stop_recording, daemon=True).start(),
         )
     else:
-        # Toggle mode: press to start, press again to stop (or VAD auto-stops)
-        def toggle_dictation(e):
+        def toggle_dictation():
             if recording:
                 threading.Thread(target=stop_recording, daemon=True).start()
             else:
                 start_recording("dictation")
 
-        def toggle_command(e):
+        def toggle_command():
             if recording:
                 threading.Thread(target=stop_recording, daemon=True).start()
             else:
                 start_recording("command")
 
-        keyboard.on_press_key(hotkey_dict, toggle_dictation)
-        keyboard.on_press_key(hotkey_cmd, toggle_command)
+        _register_hotkey(hotkey_dict, on_press=toggle_dictation)
+        _register_hotkey(hotkey_cmd, on_press=toggle_command)
 
 
 # ============================================================

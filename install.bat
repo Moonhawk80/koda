@@ -14,12 +14,12 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 
-echo [1/4] Python found:
+echo [1/5] Python found:
 python --version
 echo.
 
 :: Create venv
-echo [2/4] Creating virtual environment...
+echo [2/5] Creating virtual environment...
 if exist venv (
     echo        Virtual environment already exists, skipping.
 ) else (
@@ -33,7 +33,7 @@ if exist venv (
 echo.
 
 :: Install dependencies
-echo [3/4] Installing dependencies (this may take a few minutes)...
+echo [3/5] Installing dependencies (this may take a few minutes)...
 call venv\Scripts\activate
 pip install -r requirements.txt --quiet
 if %errorlevel% neq 0 (
@@ -44,8 +44,13 @@ if %errorlevel% neq 0 (
 echo        Dependencies installed.
 echo.
 
-:: Download Whisper model
-echo [4/4] Downloading Whisper speech model (first time only, ~150MB)...
+:: Generate sound effects
+echo [4/5] Generating sound effects...
+python generate_sounds.py
+echo.
+
+:: Download Whisper model (will be re-downloaded if user picks a different size in setup)
+echo [5/5] Downloading default speech model (first time only, ~150MB)...
 python -c "from faster_whisper import WhisperModel; WhisperModel('base', device='cpu', compute_type='int8'); print('        Model downloaded and verified.')"
 if %errorlevel% neq 0 (
     echo [ERROR] Failed to download Whisper model.
@@ -58,13 +63,8 @@ echo ============================================
 echo   Installation complete!
 echo ============================================
 echo.
-echo To start Voice-to-Claude:
-echo   Double-click "start.bat"
+echo Now launching the setup wizard...
 echo.
-echo To run on Windows startup:
-echo   Double-click "install_startup.bat"
-echo.
-echo To run the stress test:
-echo   Double-click "test.bat"
-echo.
-pause
+
+:: Run interactive setup
+python configure.py

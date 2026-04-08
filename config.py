@@ -12,12 +12,12 @@ CONFIG_PATH = os.path.join(CONFIG_DIR, "config.json")
 DEFAULT_CONFIG = {
     "model_size": "base",
     "language": "en",
-    "hotkey_dictation": "f9",
-    "hotkey_command": "f10",
+    "hotkey_dictation": "ctrl+space",
+    "hotkey_command": "ctrl+shift+.",
     "hotkey_mode": "hold",
     "mic_device": None,
     "sound_effects": True,
-    "notifications": True,
+    "notifications": False,
     "noise_reduction": False,
     "post_processing": {
         "remove_filler_words": True,
