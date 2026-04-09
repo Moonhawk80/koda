@@ -69,10 +69,24 @@ SOUNDS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sounds")
 
 
 def _play_wav(filename):
-    """Play a .wav file asynchronously."""
+    """Play a .wav file through the system default output device."""
     filepath = os.path.join(SOUNDS_DIR, filename)
-    if os.path.exists(filepath):
-        winsound.PlaySound(filepath, winsound.SND_FILENAME | winsound.SND_ASYNC | winsound.SND_NODEFAULT)
+    if not os.path.exists(filepath):
+        return
+
+    def _play():
+        try:
+            import wave
+            with wave.open(filepath, 'r') as wf:
+                rate = wf.getframerate()
+                frames = wf.readframes(wf.getnframes())
+                audio = np.frombuffer(frames, dtype=np.int16).astype(np.float32) / 32767
+            sd.play(audio, samplerate=rate)
+        except Exception:
+            # Fallback to winsound
+            winsound.PlaySound(filepath, winsound.SND_FILENAME | winsound.SND_ASYNC | winsound.SND_NODEFAULT)
+
+    threading.Thread(target=_play, daemon=True).start()
 
 
 def play_start_sound():
@@ -323,11 +337,38 @@ def audio_callback(indata, frames, time_info, status):
                 wake_buffer.pop(0)
 
 
+streaming_text = ""  # Latest partial transcription
+
+
+def _streaming_thread():
+    """Periodically transcribe accumulated audio during recording for live preview."""
+    global streaming_text
+    while recording:
+        time.sleep(2)
+        if not recording or len(audio_chunks) < 10:
+            continue
+        try:
+            audio = np.concatenate(audio_chunks, axis=0).flatten()
+            segments, _ = model.transcribe(
+                audio, beam_size=1, language=config.get("language", "en"),
+                vad_filter=False,
+            )
+            text = " ".join(seg.text for seg in segments).strip()
+            if text:
+                streaming_text = text
+                # Show partial text in tray tooltip
+                preview = text[:80] + "..." if len(text) > 80 else text
+                update_tray("#e74c3c", f"Koda: {preview}")
+        except Exception:
+            pass
+
+
 def start_recording(mode="dictation", force_vad=False, vad_timeout_ms=None):
-    global recording, audio_chunks, last_speech_time, recording_mode
+    global recording, audio_chunks, last_speech_time, recording_mode, streaming_text
     if recording:
         return
     audio_chunks = []
+    streaming_text = ""
     recording_mode = mode
     last_speech_time = time.time()
     recording = True
@@ -335,6 +376,10 @@ def start_recording(mode="dictation", force_vad=False, vad_timeout_ms=None):
     play_start_sound()
     label = "Dictation" if mode == "dictation" else "Command"
     update_tray("#e74c3c", f"Koda: Recording ({label})...")
+
+    # Start streaming transcription in background
+    if config.get("streaming", True):
+        threading.Thread(target=_streaming_thread, daemon=True).start()
 
     # Use VAD auto-stop in toggle mode OR when triggered by wake word
     if force_vad or config.get("hotkey_mode", "hold") == "toggle":
@@ -446,10 +491,28 @@ def _get_tts():
         try:
             import pyttsx3
             tts_engine = pyttsx3.init()
-            tts_engine.setProperty('rate', 160)
+            rate = config.get("tts", {}).get("rate", 160)
+            tts_engine.setProperty('rate', rate)
+            # Set voice if configured
+            voice_name = config.get("tts", {}).get("voice", None)
+            if voice_name:
+                for v in tts_engine.getProperty('voices'):
+                    if voice_name.lower() in v.name.lower():
+                        tts_engine.setProperty('voice', v.id)
+                        break
         except Exception:
             return None
     return tts_engine
+
+
+def get_available_voices():
+    """List available TTS voices."""
+    try:
+        import pyttsx3
+        engine = pyttsx3.init()
+        return [(v.name, v.id) for v in engine.getProperty('voices')]
+    except Exception:
+        return []
 
 
 def read_back():
@@ -642,6 +705,10 @@ def build_menu():
             toggle_wake_word,
             checked=lambda item: config.get("wake_word", {}).get("enabled", False),
         ),
+        pystray.MenuItem(
+            "Read-back voice",
+            pystray.Menu(*_build_voice_menu_items()),
+        ),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem(
             "Switch to Toggle mode" if mode == "hold" else "Switch to Hold mode",
@@ -651,6 +718,36 @@ def build_menu():
         pystray.Menu.SEPARATOR,
         pystray.MenuItem("Quit", on_quit),
     )
+
+
+def _build_voice_menu_items():
+    """Build radio button menu items for available TTS voices."""
+    current_voice = config.get("tts", {}).get("voice", "")
+    voices = get_available_voices()
+    if not voices:
+        return [pystray.MenuItem("No voices available", None, enabled=False)]
+
+    items = []
+    for name, vid in voices:
+        short = name.replace("Microsoft ", "").replace(" Desktop", "")
+
+        def make_handler(vname):
+            def handler(icon, item):
+                global tts_engine
+                tts = config.setdefault("tts", {})
+                tts["voice"] = vname
+                save_config(config)
+                tts_engine = None  # Reset so it picks up new voice
+                icon.menu = build_menu()
+            return handler
+
+        items.append(pystray.MenuItem(
+            short,
+            make_handler(name),
+            checked=lambda item, n=name: n.lower() in config.get("tts", {}).get("voice", "").lower(),
+            radio=True,
+        ))
+    return items
 
 
 def toggle_setting(key):

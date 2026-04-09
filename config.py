@@ -22,6 +22,7 @@ DEFAULT_CONFIG = {
     "sound_effects": True,
     "notifications": False,
     "noise_reduction": False,
+    "streaming": True,
     "post_processing": {
         "remove_filler_words": True,
         "code_vocabulary": False,
