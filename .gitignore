@@ -10,3 +10,4 @@ dist/
 *.spec
 koda_history.db
 debug.log
+_model_*/
