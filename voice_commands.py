@@ -182,6 +182,24 @@ _SUFFIX_COMMANDS = [
 ]
 
 
+def register_extra_commands(commands):
+    """Register additional voice commands from plugins.
+
+    Args:
+        commands: list of (regex_pattern, action_function, description)
+    """
+    for pattern, action, desc in commands:
+        _COMPILED_COMMANDS.append(
+            (re.compile(r"^\s*" + pattern + r"\s*[.!?]?\s*$", re.IGNORECASE), action, desc)
+        )
+        _PREFIX_COMMANDS.append(
+            (re.compile(r"^\s*" + pattern + r"[\s,.!?]+", re.IGNORECASE), action, desc)
+        )
+        _SUFFIX_COMMANDS.append(
+            (re.compile(r"[\s,.!?]+" + pattern + r"\s*[.!?]?\s*$", re.IGNORECASE), action, desc)
+        )
+
+
 def extract_and_execute_commands(text):
     """Check if text contains voice commands. Execute them and return remaining text.
 

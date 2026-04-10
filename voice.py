@@ -13,6 +13,7 @@ import sys
 import os
 import time
 import threading
+import logging
 import winsound
 import numpy as np
 import sounddevice as sd
@@ -29,10 +30,20 @@ from overlay import KodaOverlay
 from profiles import ProfileMonitor
 from voice_commands import extract_and_execute_commands
 from stats import init_stats_db as init_stats, log_transcription_stats, log_command_stats
+from plugin_manager import PluginManager
 
+
+# --- Logging ---
+logging.basicConfig(
+    filename=os.path.join(os.path.dirname(os.path.abspath(__file__)), "debug.log"),
+    level=logging.WARNING,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+)
+logger = logging.getLogger("koda")
+logger.setLevel(logging.DEBUG)  # Koda's own logger is DEBUG, but library noise is WARNING+
 
 # --- Version ---
-VERSION = "3.1.0"
+VERSION = "4.0.0"
 
 # --- Globals ---
 recording = False
@@ -52,6 +63,7 @@ wake_buffer_lock = threading.Lock()
 overlay = None  # Floating status overlay
 profile_monitor = None  # Per-app profile switcher
 base_config = {}  # Original config before profile overrides
+plugins = PluginManager()  # Plugin system
 
 
 # ============================================================
@@ -205,8 +217,15 @@ def notify(message, title="Koda"):
 def load_whisper_model():
     global model
     from faster_whisper import WhisperModel
-    model_size = config.get("model_size", "base")
-    model = WhisperModel(model_size, device="cpu", compute_type="int8")
+    model_size = config.get("model_size", "small")
+
+    # When running as PyInstaller exe, use the bundled model
+    base_dir = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
+    bundled = os.path.join(base_dir, f"_model_{model_size}")
+    if os.path.isdir(bundled):
+        model = WhisperModel(bundled, device="cpu", compute_type="int8")
+    else:
+        model = WhisperModel(model_size, device="cpu", compute_type="int8")
 
 
 # ============================================================
@@ -563,6 +582,7 @@ def _transcribe_and_paste():
             if t and (not seg_texts or t != seg_texts[-1]):
                 seg_texts.append(t)
         text = " ".join(seg_texts).strip()
+        logger.debug("Whisper raw: %r", text)
 
         if not text:
             update_tray("#2ecc71", "Koda: Ready")
@@ -571,6 +591,7 @@ def _transcribe_and_paste():
         # Apply custom vocabulary replacements
         if custom_words:
             text = apply_custom_vocabulary(text, custom_words)
+            logger.debug("After custom vocab: %r", text)
 
         # Post-processing
         if recording_mode == "command":
@@ -587,6 +608,12 @@ def _transcribe_and_paste():
                 }
             }
             processed = process_text(text, light_config)
+
+        # Run plugin text processors
+        if plugins.loaded:
+            processed = plugins.run_text_processors(processed, config)
+
+        logger.debug("After process_text: %r", processed)
 
         # Translation: if target is not English, use LLM to translate
         # (Whisper handles → English natively via task="translate")
@@ -960,6 +987,9 @@ def build_menu():
         pystray.MenuItem("Usage stats", lambda icon, item: _open_stats()),
         pystray.MenuItem("Settings window", lambda icon, item: _open_settings_gui()),
         pystray.MenuItem("Open config file", lambda icon, item: open_config_file()),
+        # Plugin menu items
+        *[pystray.MenuItem(label, lambda icon, item, cb=cb: cb())
+          for label, cb in plugins.get_all_menu_items()],
         pystray.Menu.SEPARATOR,
         pystray.MenuItem("Quit", on_quit),
     )
@@ -1246,6 +1276,17 @@ def run_setup():
     init_tts()
     init_db()
     init_stats()
+
+    # Load plugins
+    plugins.discover_and_load(config)
+    if plugins.loaded:
+        logger.info("Loaded %d plugin(s): %s", len(plugins.loaded), ", ".join(plugins.loaded))
+        # Register plugin voice commands
+        plugin_cmds = plugins.get_all_commands()
+        if plugin_cmds:
+            from voice_commands import register_extra_commands
+            register_extra_commands(plugin_cmds)
+            logger.info("Registered %d plugin command(s)", len(plugin_cmds))
 
     mic_device = config.get("mic_device")
     stream = sd.InputStream(

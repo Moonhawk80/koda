@@ -4,10 +4,10 @@ import os
 import shutil
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-MODEL_DIR = os.path.expanduser("~/.cache/huggingface/hub/models--Systran--faster-whisper-base/snapshots/ebe41f70d5b6dfa9166e2c581c45c9c0cfc57b66")
+MODEL_DIR = os.path.expanduser("~/.cache/huggingface/hub/models--Systran--faster-whisper-small/snapshots/536b0662742c02347bc0e980a01041f333bce120")
 
 # Copy model to a local dir for bundling
-bundle_model = os.path.join(SCRIPT_DIR, "_model_base")
+bundle_model = os.path.join(SCRIPT_DIR, "_model_small")
 if os.path.exists(MODEL_DIR):
     if os.path.exists(bundle_model):
         shutil.rmtree(bundle_model)
@@ -28,6 +28,9 @@ DATA_FILES = [
     "transcribe_file.py",
     "voice_commands.py",
     "context_menu.py",
+    "stats.py",
+    "stats_gui.py",
+    "plugin_manager.py",
     "custom_words.json",
     "profiles.json",
 ]
@@ -40,8 +43,9 @@ args = [
     "--icon=NONE",
     # Bundle all module files
     *[f"--add-data={os.path.join(SCRIPT_DIR, f)};." for f in DATA_FILES if os.path.exists(os.path.join(SCRIPT_DIR, f))],
-    # Bundle sounds directory
+    # Bundle sounds directory and plugins
     f"--add-data={os.path.join(SCRIPT_DIR, 'sounds')};sounds",
+    f"--add-data={os.path.join(SCRIPT_DIR, 'plugins')};plugins",
     # Hidden imports for pystray, PIL, pyttsx3
     "--hidden-import=pystray._win32",
     "--hidden-import=PIL._tkinter_finder",
@@ -56,9 +60,9 @@ args = [
 ]
 
 if bundle_model:
-    args.append(f"--add-data={bundle_model};_model_base")
+    args.append(f"--add-data={bundle_model};_model_small")
 
-print("Building Koda.exe with all Phase 1-3 features...")
+print("Building Koda.exe with all Phase 1-4 features + small model...")
 print(f"Bundling {len(DATA_FILES)} modules + sounds + Whisper model")
 print()
 

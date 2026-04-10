@@ -439,6 +439,13 @@ _TLDS = {
 }
 
 
+def _strip_punct(word):
+    """Strip trailing punctuation from a word, return (clean_word, trailing_punct)."""
+    clean = word.rstrip(".,!?;:")
+    trailing = word[len(clean):]
+    return clean, trailing
+
+
 def format_spoken_emails(text):
     """Convert spoken email addresses to proper format.
 
@@ -453,14 +460,15 @@ def format_spoken_emails(text):
 
     while i < len(words):
         # Look for "at" that could be part of an email
-        if words[i].lower() == "at" and i > 0 and i + 2 < len(words):
+        word_clean = _strip_punct(words[i])[0]
+        if word_clean.lower() == "at" and i > 0 and i + 2 < len(words):
             # Scan forward for "dot tld" pattern
             domain_parts = []
             j = i + 1
             while j < len(words):
                 domain_parts.append(words[j])
-                # Check if next is "dot" + word
-                if j + 2 <= len(words) - 1 and words[j + 1].lower() == "dot":
+                # Check if next is "dot" + word (strip punctuation from "dot" check)
+                if j + 2 <= len(words) - 1 and _strip_punct(words[j + 1])[0].lower() == "dot":
                     domain_parts.append(words[j + 1])
                     j += 2
                 else:
@@ -468,28 +476,28 @@ def format_spoken_emails(text):
 
             # Check if we have a valid email pattern: at least "domain dot tld"
             # and the last word after a "dot" is a known TLD
-            dot_count = sum(1 for p in domain_parts if p.lower() == "dot")
+            # Strip punctuation when checking for "dot" keywords
+            dot_count = sum(1 for p in domain_parts if _strip_punct(p)[0].lower() == "dot")
             last_word = domain_parts[-1].lower().rstrip(".,!?;:") if domain_parts else ""
 
             if dot_count >= 1 and last_word in _TLDS:
                 # Build local part (look back for "word dot word" patterns)
                 local_parts = [result.pop()]
-                while result and len(result) >= 2 and result[-1].lower() == "dot":
+                while result and len(result) >= 2 and _strip_punct(result[-1])[0].lower() == "dot":
                     result.pop()  # remove "dot"
                     local_parts.insert(0, result.pop())  # remove word before dot
 
-                local = ".".join(local_parts)
+                # Strip punctuation from local parts
+                local = ".".join(_strip_punct(p)[0] for p in local_parts)
 
-                # Build domain
+                # Build domain — strip punctuation from each part to avoid double dots
                 domain = ".".join(
-                    p for p in domain_parts if p.lower() != "dot"
+                    _strip_punct(p)[0] for p in domain_parts
+                    if _strip_punct(p)[0].lower() != "dot"
                 )
 
-                # Preserve trailing punctuation
-                trailing = ""
-                if domain and domain[-1] in ".,!?;:":
-                    trailing = domain[-1]
-                    domain = domain[:-1]
+                # Preserve trailing punctuation from the last word of the match
+                _, trailing = _strip_punct(domain_parts[-1])
 
                 result.append(f"{local}@{domain}{trailing}")
                 i = j + 1
