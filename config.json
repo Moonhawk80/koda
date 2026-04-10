@@ -27,5 +27,6 @@
   "llm_polish": {
     "enabled": false,
     "model": "phi3:mini"
-  }
+  },
+  "overlay_enabled": true
 }

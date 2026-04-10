@@ -58,32 +58,55 @@ base_config = {}  # Original config before profile overrides
 # ICON
 # ============================================================
 
-def create_icon(color="gray"):
-    """Bold, simple tray icon — entire square IS the state color with white mic.
+def create_branded_icon(size=64, dot_color=None):
+    """Koda branded icon — dark rounded square, bold font K, colored status dot.
 
-    At 16px tray size, details vanish. So the whole icon is the color:
-    bright green = ready, red = recording, orange = processing, etc.
-    Big bold white mic inside. Impossible to miss.
+    Uses Segoe UI Bold font for crisp anti-aliased K at any size.
+    Used for both tray icon and floating overlay.
     """
-    size = 64
+    from PIL import ImageFont
+
     img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
+    s = size / 64
 
-    # Entire rounded square is the state color — bold and obvious
-    draw.rounded_rectangle([0, 0, 63, 63], radius=14, fill=color)
+    # Dark rounded square background
+    draw.rounded_rectangle([0, 0, size - 1, size - 1], radius=int(14 * s), fill="#1a1a2e")
 
-    # White mic — thick and chunky so it reads at small sizes
-    W = "white"
-    # Mic body
-    draw.rounded_rectangle([23, 12, 41, 34], radius=9, fill=W)
-    # Cradle arc
-    draw.arc([15, 22, 49, 50], start=0, end=180, fill=W, width=4)
-    # Stand
-    draw.line([32, 50, 32, 56], fill=W, width=3)
-    # Base
-    draw.line([23, 56, 41, 56], fill=W, width=3)
+    # Bold K using system font — clean anti-aliased rendering
+    try:
+        font = ImageFont.truetype("segoeuib.ttf", int(42 * s))
+    except Exception:
+        try:
+            font = ImageFont.truetype("C:/Windows/Fonts/segoeuib.ttf", int(42 * s))
+        except Exception:
+            font = ImageFont.load_default()
+
+    bbox = draw.textbbox((0, 0), "K", font=font)
+    tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+    x = (size - tw) // 2 - bbox[0]
+    y = (size - th) // 2 - bbox[1] - int(2 * s)
+    draw.text((x, y), "K", fill="white", font=font)
+
+    # Status dot (bottom-right)
+    if dot_color:
+        dr = int(7 * s)
+        cx, cy = size - int(10 * s), size - int(10 * s)
+        draw.ellipse([cx - dr - 2, cy - dr - 2, cx + dr + 2, cy + dr + 2], fill="#1a1a2e")
+        draw.ellipse([cx - dr, cy - dr, cx + dr, cy + dr], fill=dot_color)
 
     return img
+
+
+def create_icon(color="gray"):
+    """Tray icon — branded K on dark bg with colored status dot."""
+    # Map state color to dot color
+    if color == "gray":
+        return create_branded_icon(64, dot_color=None)
+    elif color == "#2ecc71":
+        return create_branded_icon(64, dot_color="#2ecc71")
+    else:
+        return create_branded_icon(64, dot_color=color)
 
 
 

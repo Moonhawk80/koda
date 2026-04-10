@@ -1,19 +1,17 @@
 """
-Koda Floating Status Overlay — minimal mic icon with status dot.
+Koda Floating Status Overlay — branded K icon floating on desktop.
 
-Small, unobtrusive widget in the corner. Mic icon with a colored dot
-that changes by state. Draggable, semi-transparent.
+Same branded icon as the tray (dark square, white K, colored dot),
+displayed as a draggable floating widget. Right-click to hide.
 """
 
 import tkinter as tk
+from PIL import ImageTk
 import threading
-import time
-
-_KEY_COLOR = "#010101"
 
 
 class KodaOverlay:
-    """Minimal mic + dot overlay."""
+    """Floating branded K icon with status dot."""
 
     COLORS = {
         "ready": "#2ecc71",
@@ -25,17 +23,17 @@ class KodaOverlay:
 
     def __init__(self):
         self._root = None
-        self._canvas = None
+        self._label = None
         self._state = "ready"
         self._preview_text = ""
         self._visible = True
         self._drag_data = {"x": 0, "y": 0}
         self._thread = None
         self._running = False
-        self._opacity = 0.9
         self._position = None
-        self._dot_id = None
-        self._pulse = False
+        self._photo = None  # Keep reference to prevent GC
+        self._prev_state = None
+        self._icon_size = 48
 
     def start(self):
         if self._running:
@@ -56,48 +54,21 @@ class KodaOverlay:
         self._root = tk.Tk()
         root = self._root
 
-        SIZE = 40
+        SIZE = self._icon_size
 
         root.overrideredirect(True)
         root.attributes("-topmost", True)
-        root.attributes("-alpha", self._opacity)
         root.attributes("-toolwindow", True)
-        root.configure(bg=_KEY_COLOR)
-        root.attributes("-transparentcolor", _KEY_COLOR)
+        root.configure(bg="#1a1a2e")
 
-        self._canvas = tk.Canvas(root, width=SIZE, height=SIZE, bg=_KEY_COLOR,
-                                 highlightthickness=0, bd=0)
-        self._canvas.pack()
+        # Label to hold the icon image
+        self._label = tk.Label(root, bg="#1a1a2e", bd=0, highlightthickness=0)
+        self._label.pack()
 
-        self._SIZE = SIZE
-        cx, cy = SIZE // 2, SIZE // 2
+        # Render initial icon
+        self._update_icon()
 
-        # Draw mic icon (static, white/light gray)
-        MIC_COLOR = "#cdd6f4"
-
-        # Mic body (rounded rectangle via oval approximation)
-        self._canvas.create_oval(cx - 5, cy - 12, cx + 5, cy + 2, fill=MIC_COLOR, outline="")
-
-        # Mic cradle arc
-        self._canvas.create_arc(cx - 9, cy - 6, cx + 9, cy + 10,
-                                 start=0, extent=180, outline=MIC_COLOR, width=2, style="arc")
-
-        # Mic stand
-        self._canvas.create_line(cx, cy + 10, cx, cy + 14, fill=MIC_COLOR, width=2)
-        self._canvas.create_line(cx - 5, cy + 14, cx + 5, cy + 14, fill=MIC_COLOR, width=2)
-
-        # Status dot (bottom-right of mic) — this changes color
-        dot_x, dot_y, dot_r = cx + 10, cy + 10, 5
-        # Dot outline for visibility
-        self._canvas.create_oval(dot_x - dot_r - 1, dot_y - dot_r - 1,
-                                  dot_x + dot_r + 1, dot_y + dot_r + 1,
-                                  fill="#1e1e2e", outline="")
-        self._dot_id = self._canvas.create_oval(
-            dot_x - dot_r, dot_y - dot_r, dot_x + dot_r, dot_y + dot_r,
-            fill="#2ecc71", outline="",
-        )
-
-        # Position: bottom-right
+        # Position bottom-right
         root.update_idletasks()
         if self._position:
             x, y = self._position
@@ -105,12 +76,16 @@ class KodaOverlay:
             screen_w = root.winfo_screenwidth()
             screen_h = root.winfo_screenheight()
             x = screen_w - SIZE - 20
-            y = screen_h - SIZE - 110
+            y = screen_h - SIZE - 120
         root.geometry(f"{SIZE}x{SIZE}+{x}+{y}")
 
-        self._canvas.bind("<Button-1>", self._on_drag_start)
-        self._canvas.bind("<B1-Motion>", self._on_drag_motion)
-        self._canvas.bind("<Button-3>", lambda e: self.toggle_visible())
+        # Drag and hide
+        root.bind("<Button-1>", self._on_drag_start)
+        root.bind("<B1-Motion>", self._on_drag_motion)
+        root.bind("<Button-3>", lambda e: self.toggle_visible())
+        self._label.bind("<Button-1>", self._on_drag_start)
+        self._label.bind("<B1-Motion>", self._on_drag_motion)
+        self._label.bind("<Button-3>", lambda e: self.toggle_visible())
 
         self._poll()
 
@@ -119,29 +94,22 @@ class KodaOverlay:
         except Exception:
             pass
 
+    def _update_icon(self):
+        """Re-render the branded icon with current state dot."""
+        from voice import create_branded_icon
+        dot_color = self.COLORS.get(self._state, "#2ecc71")
+        img = create_branded_icon(self._icon_size, dot_color=dot_color)
+        self._photo = ImageTk.PhotoImage(img)
+        self._label.config(image=self._photo)
+
     def _poll(self):
         if not self._running or not self._root:
             return
         try:
-            color = self.COLORS.get(self._state, "#2ecc71")
-
-            # Pulse the dot when recording (alternate size)
-            if self._state == "recording":
-                self._pulse = not self._pulse
-                cx, cy = self._SIZE // 2 + 10, self._SIZE // 2 + 10
-                r = 6 if self._pulse else 4
-                self._canvas.coords(self._dot_id, cx - r, cy - r, cx + r, cy + r)
-            else:
-                cx, cy = self._SIZE // 2 + 10, self._SIZE // 2 + 10
-                self._canvas.coords(self._dot_id, cx - 5, cy - 5, cx + 5, cy + 5)
-
-            self._canvas.itemconfig(self._dot_id, fill=color)
-
-            # Full opacity always — user wants it visible
-            self._root.attributes("-alpha", self._opacity)
-
-            interval = 400 if self._state == "recording" else 300
-            self._root.after(interval, self._poll)
+            if self._state != self._prev_state:
+                self._update_icon()
+                self._prev_state = self._state
+            self._root.after(300, self._poll)
         except Exception:
             pass
 
@@ -154,8 +122,6 @@ class KodaOverlay:
         y = event.y_root - self._drag_data["y"]
         self._root.geometry(f"+{x}+{y}")
         self._position = (x, y)
-
-    # --- Public API ---
 
     def set_state(self, state, preview=""):
         self._state = state
