@@ -932,18 +932,33 @@ _watchdog_running = False
 def _watchdog_thread():
     """Monitor Koda's health and auto-recover from failures.
 
-    Checks every 30 seconds:
+    Checks every 15 seconds:
     - Audio stream is active
     - Keyboard hooks are alive (re-registers if dead)
-    - Updates tray if in error state
+    - Logs heartbeat every 5 minutes for diagnostics
     """
     global _watchdog_running
     _watchdog_running = True
+    check_count = 0
     logger.info("Watchdog started")
 
     while _watchdog_running:
-        time.sleep(30)
+        time.sleep(15)
+        check_count += 1
         try:
+            # Heartbeat every 5 minutes (20 checks at 15s intervals)
+            if check_count % 20 == 0:
+                mem_mb = 0
+                try:
+                    import psutil
+                    mem_mb = psutil.Process().memory_info().rss / (1024 * 1024)
+                except Exception:
+                    pass
+                hook_count = len(keyboard._hooks) if hasattr(keyboard, '_hooks') else -1
+                stream_ok = stream.active if stream else False
+                logger.info("Watchdog heartbeat: hooks=%d stream=%s mem=%.0fMB",
+                            hook_count, stream_ok, mem_mb)
+
             # Check audio stream health
             if stream and not stream.active:
                 logger.warning("Audio stream died — restarting")
@@ -960,18 +975,24 @@ def _watchdog_thread():
                     error_notify("Microphone disconnected. Check your mic and restart Koda.")
                     update_tray("#e74c3c", "Koda: Mic error")
 
-            # Check keyboard hooks are alive by testing internal state
-            # The keyboard library stores hooks in keyboard._hooks or keyboard._hotkeys
-            # If they're empty, hooks were dropped
+            # Check keyboard hooks are alive
+            # Windows silently drops low-level hooks if the hook thread can't respond
+            # fast enough (e.g., during CPU-intensive Whisper transcription via GIL)
             try:
                 hook_count = len(keyboard._hooks) if hasattr(keyboard, '_hooks') else -1
                 if hook_count == 0 and _hotkeys_registered:
-                    logger.warning("Keyboard hooks lost — re-registering")
+                    logger.warning("Keyboard hooks lost (count=%d) — re-registering", hook_count)
                     setup_hotkeys()
                     error_notify("Hotkeys recovered automatically. You're good to go.")
                     update_tray("#2ecc71", "Koda: Ready (recovered)")
             except Exception as e:
                 logger.error("Hook health check error: %s", e)
+                # If we can't even check hooks, force re-register
+                try:
+                    setup_hotkeys()
+                    logger.info("Force re-registered hotkeys after check error")
+                except Exception:
+                    pass
 
         except Exception as e:
             logger.error("Watchdog error: %s", e)
