@@ -470,8 +470,8 @@ def _streaming_thread():
                 update_tray("#e74c3c", f"Koda: {preview}")
                 if overlay:
                     overlay.set_preview(text)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error("Streaming transcription error: %s", e)
 
 
 def start_recording(mode="dictation", force_vad=False, vad_timeout_ms=None):
@@ -527,7 +527,8 @@ def _load_custom_words():
         import json
         with open(custom_words_path, "r", encoding="utf-8") as f:
             return json.load(f)
-    except Exception:
+    except Exception as e:
+        logger.warning("Could not load custom words: %s", e)
         return {}
 
 
@@ -542,8 +543,8 @@ def _transcribe_and_paste():
             try:
                 import noisereduce as nr
                 audio = nr.reduce_noise(y=audio, sr=16000, stationary=True)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("Noise reduction failed: %s", e)
 
         # Load custom vocabulary for initial_prompt and post-processing
         custom_words = _load_custom_words()
@@ -663,13 +664,14 @@ def _transcribe_and_paste():
                         from profiles import get_active_window_info
                         app_name, _ = get_active_window_info()
                         prof_name = profile_monitor.current_profile or ""
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.warning("Profile detection error: %s", e)
                 log_transcription_stats(processed, recording_mode, duration, app_name, prof_name)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.error("Failed to save stats: %s", e)
 
     except Exception as e:
+        logger.error("Transcription pipeline error: %s", e, exc_info=True)
         play_error_sound()
     finally:
         update_tray("#2ecc71", "Koda: Ready")
@@ -821,6 +823,7 @@ def read_selected():
 # ============================================================
 
 _registered_release_keys = set()  # Track which release keys are already hooked
+_hotkeys_registered = False  # Track if hotkeys are active
 
 
 def _register_hotkey(hotkey_str, on_press, on_release=None):
@@ -828,24 +831,36 @@ def _register_hotkey(hotkey_str, on_press, on_release=None):
     trigger_key = parts[-1]
     modifiers = parts[:-1]
 
-    if modifiers:
-        keyboard.add_hotkey(hotkey_str, on_press, suppress=False)
-        if on_release and trigger_key not in _registered_release_keys:
-            _registered_release_keys.add(trigger_key)
-            # Only fire release if we're actually recording (prevents spurious fires)
-            keyboard.on_release_key(trigger_key, lambda e: on_release() if recording else None)
-    else:
-        keyboard.on_press_key(trigger_key, lambda e: on_press())
-        if on_release and trigger_key not in _registered_release_keys:
-            _registered_release_keys.add(trigger_key)
-            keyboard.on_release_key(trigger_key, lambda e: on_release() if recording else None)
+    try:
+        if modifiers:
+            keyboard.add_hotkey(hotkey_str, on_press, suppress=False)
+            if on_release and trigger_key not in _registered_release_keys:
+                _registered_release_keys.add(trigger_key)
+                keyboard.on_release_key(trigger_key, lambda e: on_release() if recording else None)
+        else:
+            keyboard.on_press_key(trigger_key, lambda e: on_press())
+            if on_release and trigger_key not in _registered_release_keys:
+                _registered_release_keys.add(trigger_key)
+                keyboard.on_release_key(trigger_key, lambda e: on_release() if recording else None)
+        logger.debug("Registered hotkey: %s", hotkey_str)
+    except Exception as e:
+        logger.error("Failed to register hotkey %s: %s", hotkey_str, e)
 
 
 def setup_hotkeys():
+    global _hotkeys_registered
     hotkey_dict = config.get("hotkey_dictation", "ctrl+space")
     hotkey_cmd = config.get("hotkey_command", "ctrl+shift+.")
     hotkey_correct = config.get("hotkey_correction", "ctrl+shift+z")
     mode = config.get("hotkey_mode", "hold")
+
+    # Clear any existing hooks before re-registering
+    try:
+        keyboard.unhook_all()
+        _registered_release_keys.clear()
+        logger.debug("Cleared existing keyboard hooks")
+    except Exception as e:
+        logger.error("Error clearing keyboard hooks: %s", e)
 
     if mode == "hold":
         _register_hotkey(
@@ -879,12 +894,67 @@ def setup_hotkeys():
         target=undo_and_rerecord, daemon=True).start())
 
     # Read-back hotkeys
-    hotkey_read = config.get("hotkey_readback", "ctrl+shift+r")
-    hotkey_read_sel = config.get("hotkey_readback_selected", "ctrl+shift+t")
+    hotkey_read = config.get("hotkey_readback", "ctrl+alt+r")
+    hotkey_read_sel = config.get("hotkey_readback_selected", "ctrl+alt+t")
     _register_hotkey(hotkey_read, on_press=lambda: threading.Thread(
         target=read_back, daemon=True).start())
     _register_hotkey(hotkey_read_sel, on_press=lambda: threading.Thread(
         target=read_selected, daemon=True).start())
+
+    _hotkeys_registered = True
+    logger.info("All hotkeys registered (mode=%s)", mode)
+
+
+# ============================================================
+# HEALTH WATCHDOG
+# ============================================================
+
+_watchdog_running = False
+
+
+def _watchdog_thread():
+    """Monitor Koda's health and auto-recover from failures.
+
+    Checks every 30 seconds:
+    - Audio stream is active
+    - Keyboard hooks are alive (re-registers if dead)
+    - Updates tray if in error state
+    """
+    global _watchdog_running
+    _watchdog_running = True
+    logger.info("Watchdog started")
+
+    while _watchdog_running:
+        time.sleep(30)
+        try:
+            # Check audio stream health
+            if stream and not stream.active:
+                logger.warning("Audio stream died — restarting")
+                try:
+                    stream.stop()
+                except Exception:
+                    pass
+                try:
+                    stream.start()
+                    logger.info("Audio stream restarted successfully")
+                except Exception as e:
+                    logger.error("Failed to restart audio stream: %s", e)
+                    update_tray("#e74c3c", "Koda: Mic error")
+
+            # Check keyboard hooks are alive by testing internal state
+            # The keyboard library stores hooks in keyboard._hooks or keyboard._hotkeys
+            # If they're empty, hooks were dropped
+            try:
+                hook_count = len(keyboard._hooks) if hasattr(keyboard, '_hooks') else -1
+                if hook_count == 0 and _hotkeys_registered:
+                    logger.warning("Keyboard hooks lost — re-registering")
+                    setup_hotkeys()
+                    update_tray("#2ecc71", "Koda: Ready (recovered)")
+            except Exception as e:
+                logger.error("Hook health check error: %s", e)
+
+        except Exception as e:
+            logger.error("Watchdog error: %s", e)
 
 
 # ============================================================
@@ -1242,9 +1312,16 @@ def switch_mode(icon, item):
 # ============================================================
 
 def on_quit(icon, item):
-    global stream, wake_word_active
+    global stream, wake_word_active, _watchdog_running
+    logger.info("Koda shutting down")
+    _watchdog_running = False
     wake_word_active = False
-    keyboard.unhook_all()
+    try:
+        keyboard.unhook_all()
+    except Exception as e:
+        logger.error("Error unhooking keyboard: %s", e)
+    if plugins.loaded:
+        plugins.unload_all()
     if profile_monitor:
         profile_monitor.stop()
     if overlay:
@@ -1301,36 +1378,71 @@ def run_setup():
     setup_hotkeys()
     start_wake_word_listener()
 
+    # Start health watchdog
+    threading.Thread(target=_watchdog_thread, daemon=True).start()
+
     update_tray("#2ecc71", "Koda: Ready")
+    logger.info("Koda v%s fully initialized", VERSION)
 
 
 _lock_handle = None
 
 
+def _find_stale_koda_pids():
+    """Find pythonw/python PIDs running voice.py (i.e., other Koda instances)."""
+    import subprocess
+    pids = []
+    try:
+        # WMIC gives us the command line of each process
+        result = subprocess.run(
+            ["wmic", "process", "where",
+             "name='pythonw.exe' or name='python.exe'",
+             "get", "processid,commandline"],
+            capture_output=True, text=True, timeout=5
+        )
+        for line in result.stdout.splitlines():
+            if "voice.py" in line and str(os.getpid()) not in line:
+                # Extract PID (last number on the line)
+                parts = line.strip().split()
+                if parts:
+                    try:
+                        pids.append(int(parts[-1]))
+                    except ValueError:
+                        pass
+    except Exception as e:
+        logger.warning("Could not scan for stale Koda processes: %s", e)
+    return pids
+
+
 def _acquire_single_instance():
-    """Ensure only one Koda instance runs at a time using a mutex."""
+    """Ensure only one Koda instance runs at a time using a mutex.
+
+    If a stale Koda is detected (mutex exists but process is ours to claim),
+    kill the stale process and take ownership.
+    """
     global _lock_handle
     import ctypes
     _lock_handle = ctypes.windll.kernel32.CreateMutexW(None, True, "KodaVoiceAppMutex")
     if ctypes.windll.kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
-        # Check if another Koda instance is actually running
-        import subprocess
-        result = subprocess.run(
-            ["tasklist", "//fi", "imagename eq pythonw.exe"],
-            capture_output=True, text=True
-        )
-        result2 = subprocess.run(
-            ["tasklist", "//fi", "imagename eq python.exe"],
-            capture_output=True, text=True
-        )
-        # Count large python processes (>100MB = has Whisper loaded = is Koda)
-        if "pythonw.exe" in result.stdout or "python.exe" in result2.stdout:
+        stale_pids = _find_stale_koda_pids()
+        if stale_pids:
+            import subprocess
+            logger.info("Found stale Koda process(es): %s — killing", stale_pids)
+            for pid in stale_pids:
+                try:
+                    subprocess.run(["taskkill", "//f", "//pid", str(pid)],
+                                   capture_output=True, timeout=5)
+                except Exception:
+                    pass
+            # Wait briefly for processes to die, then reclaim mutex
+            time.sleep(1)
+            ctypes.windll.kernel32.ReleaseMutex(_lock_handle)
+            ctypes.windll.kernel32.CloseHandle(_lock_handle)
+            _lock_handle = ctypes.windll.kernel32.CreateMutexW(None, True, "KodaVoiceAppMutex")
+        else:
+            # Mutex exists but no stale Koda found — a live instance is running
             print("Koda is already running. Exiting.")
             sys.exit(0)
-        # Stale mutex — take ownership
-        ctypes.windll.kernel32.ReleaseMutex(_lock_handle)
-        ctypes.windll.kernel32.CloseHandle(_lock_handle)
-        _lock_handle = ctypes.windll.kernel32.CreateMutexW(None, True, "KodaVoiceAppMutex")
 
 
 def main():
