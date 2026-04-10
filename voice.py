@@ -926,7 +926,7 @@ def _build_hotkey_config():
     return {
         "hotkey_dictation": config.get("hotkey_dictation", "ctrl+space"),
         "hotkey_command": config.get("hotkey_command", "ctrl+alt+d"),
-        "hotkey_prompt": config.get("hotkey_prompt", "ctrl+alt+p"),
+        "hotkey_prompt": config.get("hotkey_prompt", "f9"),
         "hotkey_correction": config.get("hotkey_correction", "ctrl+shift+z"),
         "hotkey_readback": config.get("hotkey_readback", "ctrl+alt+r"),
         "hotkey_readback_selected": config.get("hotkey_readback_selected", "ctrl+alt+t"),
@@ -1089,7 +1089,7 @@ def _watchdog_thread():
 def build_menu():
     hotkey_dict = config.get("hotkey_dictation", "ctrl+space").upper()
     hotkey_cmd = config.get("hotkey_command", "ctrl+alt+d").upper()
-    hotkey_prompt = config.get("hotkey_prompt", "ctrl+alt+p").upper()
+    hotkey_prompt = config.get("hotkey_prompt", "f9").upper()
     hotkey_corr = config.get("hotkey_correction", "ctrl+shift+z").upper()
     hotkey_read = config.get("hotkey_readback", "ctrl+shift+r").upper()
     hotkey_read_sel = config.get("hotkey_readback_selected", "ctrl+shift+t").upper()

@@ -97,7 +97,7 @@ def service_main(conn, hotkey_config):
     # --- Read config ---
     hotkey_dict = hotkey_config.get("hotkey_dictation", "ctrl+space")
     hotkey_cmd = hotkey_config.get("hotkey_command", "ctrl+alt+d")
-    hotkey_prompt = hotkey_config.get("hotkey_prompt", "ctrl+alt+p")
+    hotkey_prompt = hotkey_config.get("hotkey_prompt", "f9")
     hotkey_correct = hotkey_config.get("hotkey_correction", "ctrl+shift+z")
     hotkey_read = hotkey_config.get("hotkey_readback", "ctrl+alt+r")
     hotkey_read_sel = hotkey_config.get("hotkey_readback_selected", "ctrl+alt+t")

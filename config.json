@@ -3,7 +3,7 @@
   "language": "en",
   "hotkey_dictation": "ctrl+space",
   "hotkey_command": "ctrl+alt+d",
-  "hotkey_prompt": "ctrl+alt+p",
+  "hotkey_prompt": "f9",
   "hotkey_correction": "ctrl+shift+z",
   "hotkey_readback": "ctrl+alt+r",
   "hotkey_readback_selected": "ctrl+alt+t",
