@@ -925,8 +925,8 @@ def _build_hotkey_config():
     log_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "debug.log")
     return {
         "hotkey_dictation": config.get("hotkey_dictation", "ctrl+space"),
-        "hotkey_command": config.get("hotkey_command", "ctrl+alt+space"),
-        "hotkey_prompt": config.get("hotkey_prompt", "ctrl+`"),
+        "hotkey_command": config.get("hotkey_command", "ctrl+alt+d"),
+        "hotkey_prompt": config.get("hotkey_prompt", "ctrl+alt+p"),
         "hotkey_correction": config.get("hotkey_correction", "ctrl+shift+z"),
         "hotkey_readback": config.get("hotkey_readback", "ctrl+alt+r"),
         "hotkey_readback_selected": config.get("hotkey_readback_selected", "ctrl+alt+t"),
@@ -1088,8 +1088,8 @@ def _watchdog_thread():
 
 def build_menu():
     hotkey_dict = config.get("hotkey_dictation", "ctrl+space").upper()
-    hotkey_cmd = config.get("hotkey_command", "ctrl+alt+space").upper()
-    hotkey_prompt = config.get("hotkey_prompt", "ctrl+`").upper()
+    hotkey_cmd = config.get("hotkey_command", "ctrl+alt+d").upper()
+    hotkey_prompt = config.get("hotkey_prompt", "ctrl+alt+p").upper()
     hotkey_corr = config.get("hotkey_correction", "ctrl+shift+z").upper()
     hotkey_read = config.get("hotkey_readback", "ctrl+shift+r").upper()
     hotkey_read_sel = config.get("hotkey_readback_selected", "ctrl+shift+t").upper()
