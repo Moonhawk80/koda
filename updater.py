@@ -13,7 +13,7 @@ from packaging.version import Version
 
 logger = logging.getLogger("koda")
 
-GITHUB_REPO = "Alex-Alternative/koda"
+GITHUB_REPO = "Moonhawk80/koda"
 RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 RELEASES_PAGE = f"https://github.com/{GITHUB_REPO}/releases/latest"
 

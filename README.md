@@ -27,7 +27,7 @@ All hotkeys are configurable in `config.json`.
 
 ### Option A: Windows Installer (recommended)
 
-1. Download `KodaSetup-4.2.0.exe` from [Releases](https://github.com/Alex-Alternative/koda/releases)
+1. Download `KodaSetup-4.2.0.exe` from [Releases](https://github.com/Moonhawk80/koda/releases)
 2. Double-click to install
 3. Launch Koda from the Start Menu or desktop shortcut
 
@@ -36,7 +36,7 @@ All hotkeys are configurable in `config.json`.
 **Requirements:** Windows 10/11, Python 3.10+, a microphone, ~500MB disk space.
 
 ```
-git clone https://github.com/Alex-Alternative/koda.git
+git clone https://github.com/Moonhawk80/koda.git
 cd koda
 python -m venv venv
 venv\Scripts\activate

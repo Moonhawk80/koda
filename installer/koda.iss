@@ -11,7 +11,7 @@
 #define MyAppName "Koda"
 #define MyAppVersion "4.2.0"
 #define MyAppPublisher "Alex Alternative"
-#define MyAppURL "https://github.com/Alex-Alternative/koda"
+#define MyAppURL "https://github.com/Moonhawk80/koda"
 #define MyAppExeName "Koda.exe"
 
 [Setup]
