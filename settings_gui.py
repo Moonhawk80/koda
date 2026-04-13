@@ -419,7 +419,7 @@ class KodaSettings(tk.Tk):
         except Exception:
             return []
 
-    def save(self):
+    def save(self, notify=True):
         cfg = self.config_data
 
         cfg["hotkey_dictation"] = self.hk_dict_var.get()
@@ -457,10 +457,11 @@ class KodaSettings(tk.Tk):
         self._save_custom_words_data()
         self._save_profiles_data()
         self._save_filler_words_data()
-        messagebox.showinfo("Koda", "Settings saved! Restart Koda for changes to take effect.")
+        if notify:
+            messagebox.showinfo("Koda", "Settings saved! Restart Koda for changes to take effect.")
 
     def save_and_restart(self):
-        self.save()
+        self.save(notify=False)
         import subprocess
         import time
         # Kill only the main Koda process (pythonw.exe).
