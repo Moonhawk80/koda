@@ -15,6 +15,7 @@ import time
 import threading
 import multiprocessing
 import logging
+import ctypes
 import winsound
 import numpy as np
 import sounddevice as sd
@@ -1038,6 +1039,25 @@ def setup_hotkeys():
 # ============================================================
 
 _watchdog_running = False
+_screen_was_locked = False
+
+
+def _is_screen_locked():
+    """Return True if the Windows session is currently locked.
+
+    When locked, the input desktop switches to Winlogon and is inaccessible
+    from the user session — OpenInputDesktop returns 0 or a non-Default desktop.
+    """
+    try:
+        hdesk = ctypes.windll.user32.OpenInputDesktop(0, False, 0x0001)
+        if not hdesk:
+            return True  # Can't open input desktop — session is locked
+        buf = ctypes.create_unicode_buffer(256)
+        ctypes.windll.user32.GetUserObjectInformationW(hdesk, 2, buf, ctypes.sizeof(buf), None)
+        ctypes.windll.user32.CloseDesktop(hdesk)
+        return buf.value.lower() != "default"
+    except Exception:
+        return False
 
 
 def _restart_audio_stream():
@@ -1146,6 +1166,17 @@ def _watchdog_thread():
                 _full_recovery(f"sleep/wake, gap={elapsed_15:.0f}s")
                 last_15s_time = time.monotonic()
                 continue
+
+            # Detect screen lock/unlock — Windows corrupts keyboard modifier state
+            # on lock, breaking hotkey combinations even though the hook stays alive.
+            # Restart hotkeys immediately on unlock so state is clean.
+            global _screen_was_locked
+            locked_now = _is_screen_locked()
+            if _screen_was_locked and not locked_now:
+                logger.info("Screen unlock detected — restarting hotkeys to restore hook state")
+                setup_hotkeys()
+                update_tray("#2ecc71", "Koda: Ready")
+            _screen_was_locked = locked_now
 
             # Heartbeat every 5 minutes
             if now - last_heartbeat_time >= 300:
