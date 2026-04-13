@@ -61,8 +61,8 @@ args = [
     # Exclude heavy optional dependencies not needed at runtime
     # scipy/sklearn/sympy: pulled by openwakeword/noisereduce (optional features)
     # matplotlib: pulled by noisereduce (optional)
-    # tkinter: matplotlib backend, not used
     # pytest: dev dependency, not needed in exe
+    # NOTE: tkinter is REQUIRED by overlay.py, settings_gui.py, stats_gui.py — do NOT exclude
     "--exclude-module=scipy",
     "--exclude-module=sklearn",
     "--exclude-module=scikit-learn",
@@ -70,11 +70,14 @@ args = [
     "--exclude-module=sympy",
     "--exclude-module=pytest",
     "--exclude-module=pygments",
-    "--exclude-module=tkinter",
-    "--exclude-module=_tkinter",
     "--exclude-module=fontTools",
     "--exclude-module=setuptools",
     "--exclude-module=pip",
+    # Hidden imports for tkinter (used by overlay/settings/stats GUIs)
+    "--hidden-import=tkinter",
+    "--hidden-import=tkinter.ttk",
+    "--hidden-import=tkinter.messagebox",
+    "--hidden-import=tkinter.filedialog",
     # Output paths
     f"--distpath={os.path.join(SCRIPT_DIR, 'dist')}",
     f"--workpath={os.path.join(SCRIPT_DIR, 'build')}",
