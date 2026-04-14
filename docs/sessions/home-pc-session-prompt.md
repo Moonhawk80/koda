@@ -29,27 +29,57 @@ auto-start). We want to add 2 custom wizard pages that ask the user setup
 questions BEFORE the files are copied, then write their answers into
 %APPDATA%\Koda\config.json at the end of installation.
 
-### The two questions to add
+### The three questions to add
 
-PAGE 1 — "How would you like to use your microphone?"
+PAGE 1 — "Your microphone" (informational + verification)
+  This is NOT a question — it's a check + guidance page.
+
+  At the top, run a quick mic detection: use Exec() to call a one-liner
+  Python helper (written to a temp file by the [Code] section) that uses
+  sounddevice to list input devices and prints the count + default device name.
+  Read the output back. Show either:
+    ✓ Microphone detected: <device name>
+      "Koda will use your Windows default microphone. You can change
+       this in Settings after installation."
+  OR if no mic found:
+    ✗ No microphone detected.
+      "Please connect a microphone before using Koda."
+
+  Below the detection result, always show mic guidance:
+
+  "Koda works with any microphone. Here's what to expect:"
+    Built-in laptop mic     Works. Background noise may reduce accuracy.
+                            Best in a quiet room.
+    USB headset / earbuds   Good quality. Affordable ($15–40).
+    Dedicated USB mic       Best accuracy. ($50–100, e.g. Blue Yeti, HyperX)
+
+  "Tip: A quiet environment matters more than mic quality."
+
+  No user choice needed — this page is informational only (Next button only).
+  The mic detection result does NOT block installation — even if no mic is
+  found, the user can still install and plug one in later.
+
+  Implementation note: The Python mic-detection helper only works if Python
+  is on PATH or we use the bundled exe. Simpler fallback: just show the
+  guidance text without live detection, and add a note "Make sure your mic
+  is set as the default recording device in Windows Sound Settings."
+  Use the live detection only if it works cleanly; fall back to static text.
+
+PAGE 2 — "How would you like to use your microphone?"
   Option A: Hold to talk  (hotkey_mode = "hold")   ← default, recommended
   Option B: Toggle        (hotkey_mode = "toggle")
   Radio buttons. Caption: "Hold: press and hold Ctrl+Space while speaking.
   Toggle: press once to start, press again to stop."
 
-PAGE 2 — "Choose transcription quality"
-  Option A: Fast   — "Faster, slightly less accurate"   (model_size = "tiny")
-  Option B: Balanced — "Recommended for most users"     (model_size = "base")  ← default
-  Option C: Accurate — "Most accurate, uses more CPU"   (model_size = "small")
-  Radio buttons.
+PAGE 3 — "Choose transcription quality"
+  Option A: Fast     — "Fastest response, good for short commands"  (model_size = "tiny")
+  Option B: Balanced — "Recommended for most users"                 (model_size = "base")  ← default
+  Option C: Accurate — "Most accurate, uses more CPU"               (model_size = "small")
+  Radio buttons. Sub-caption: "This can be changed later in Settings."
 
 ### What to write to config.json
 At install completion ([Code] CurStepChanged(ssPostInstall)), write
-%APPDATA%\Koda\config.json with the user's two answers merged into the
-DEFAULT_CONFIG from config.py. The config.json must be valid JSON — read
-DEFAULT_CONFIG from config.py (copy the dict inline in Pascal, or write a
-minimal JSON with just the two keys and let Koda's _deep_merge fill the rest
-on first run).
+%APPDATA%\Koda\config.json with the answers from Pages 2 and 3.
 
 Simplest approach: write a minimal config.json with only the two chosen keys:
   {"hotkey_mode": "hold", "model_size": "base"}
@@ -80,13 +110,14 @@ will look like (describe each page's caption, sub-caption, and options).
 
 ### After implementing
 1. Rebuild the installer: venv/Scripts/python installer/build_installer.py
-2. Run KodaSetup-4.2.0.exe — confirm the two new pages appear in the wizard
-3. Make a selection on each page, complete install
-4. Check %APPDATA%\Koda\config.json — verify hotkey_mode and model_size
+2. Run KodaSetup-4.2.0.exe — confirm the three new pages appear in the wizard
+3. Page 1: verify mic detection shows your mic name (or graceful fallback text)
+4. Pages 2 & 3: make selections, complete install
+5. Check %APPDATA%\Koda\config.json — verify hotkey_mode and model_size
    reflect what you chose
-5. Launch Koda — confirm it starts with those settings (Settings window
+6. Launch Koda — confirm it starts with those settings (Settings window
    should show the chosen model and hotkey mode)
-6. Test the other path too: run the installer again with different choices,
+7. Test the other path: run the installer again with different choices,
    verify config.json updates correctly
 
 ### Key files
