@@ -61,7 +61,7 @@ DEFAULT_CONFIG = {
         "rate": "normal",
         "voice": "",
     },
-    "overlay_enabled": True,
+    "overlay_enabled": False,
     "profiles_enabled": True,
     "voice_commands": True,
     "snippets": {},
