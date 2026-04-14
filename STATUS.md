@@ -1,6 +1,6 @@
 # Koda — Session Status
 
-> **Updated:** 2026-04-14 (Session 22)
+> **Updated:** 2026-04-14 (Session 23)
 > **Version:** v4.2.0 | **Tests:** 208 passing (`test_features.py` + `test_e2e.py`) | **Branch:** master
 
 ---
@@ -19,9 +19,9 @@
 
 ## Next Session Actions (Priority Order)
 
-1. **K1 cold boot result** — user rebooting at end of session 22; confirm keyboard doesn't freeze + transcription works
-2. **Test KodaSetup-4.2.0.exe on work PC** — verify wizard branding + hotkeys work post-install
-3. **RDP test** — Phase 9 Test 3; connect to home PC via RDP from work PC, verify Ctrl+Space fires
+1. **Work PC install test** — Install KodaSetup-4.2.0.exe on work PC, verify wizard + hotkeys + transcription
+2. **RDP test** — Phase 9 Test 3; connect from work PC to home PC via RDP, verify Ctrl+Space fires
+3. **Prompt Coach research** — Generate deep research prompt for new product (separate session, separate repo)
 4. **Phase 13 feature gates** — start free/Personal/Pro tier checks in code + license key system
 
 ---
