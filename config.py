@@ -24,7 +24,7 @@ CONFIG_DIR = _resolve_config_dir()
 CONFIG_PATH = os.path.join(CONFIG_DIR, "config.json")
 
 DEFAULT_CONFIG = {
-    "model_size": "base",
+    "model_size": "small",
     "compute_type": "int8",
     "language": "en",
     "output_mode": "auto_paste",

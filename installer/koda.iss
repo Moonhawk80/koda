@@ -55,7 +55,6 @@ VersionInfoProductVersion={#MyAppVersion}.0
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
-Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional shortcuts:"
 Name: "autostart"; Description: "Start Koda when Windows starts"; GroupDescription: "Startup:"
 
 [Files]
@@ -84,9 +83,6 @@ Name: "{app}\plugins"; Permissions: users-modify
 ; Start menu
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\koda.ico"
 Name: "{group}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
-
-; Desktop shortcut (optional)
-Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\koda.ico"; Tasks: desktopicon
 
 ; Auto-start (optional)
 Name: "{userstartup}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: autostart

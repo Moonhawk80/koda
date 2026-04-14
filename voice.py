@@ -293,7 +293,7 @@ def load_whisper_model():
                 raise
         else:
             logger.error("Failed to load Whisper model: %s", e, exc_info=True)
-            error_notify(f"Failed to load speech model '{model_size}'. Check internet connection for first download.")
+            error_notify(f"Failed to load speech model '{model_size}'. Try reinstalling Koda.")
             raise
 
 
