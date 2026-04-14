@@ -1,5 +1,112 @@
 # Koda — Home/Work PC Session Prompt
 
+---
+
+## SESSION 25 PROMPT — Installer Customization Wizard
+
+Copy the block below and paste into a new Claude Code session in `C:\Users\alexi\Projects\koda`.
+
+```
+cd C:\Users\alexi\Projects\koda
+
+Read STATUS.md and docs/sessions/alex-session-24-handover.md for full context.
+Koda project — push-to-talk voice-to-text Windows tray app.
+208 tests passing. Branch: master, clean.
+DO NOT suggest Product Hunt. Do not ask for mid-task confirmation.
+Run /handover at ~40% context.
+
+## STEP 1 — Sync
+git pull origin master
+venv/Scripts/python -m pytest test_features.py test_e2e.py -q
+Expected: 208 passed. If not, stop and investigate before proceeding.
+
+## TASK — Installer customization wizard pages
+
+### Goal
+The Inno Setup installer (installer/koda.iss) currently shows only the
+standard wizard pages (welcome, license, install dir, desktop shortcut,
+auto-start). We want to add 2 custom wizard pages that ask the user setup
+questions BEFORE the files are copied, then write their answers into
+%APPDATA%\Koda\config.json at the end of installation.
+
+### The two questions to add
+
+PAGE 1 — "How would you like to use your microphone?"
+  Option A: Hold to talk  (hotkey_mode = "hold")   ← default, recommended
+  Option B: Toggle        (hotkey_mode = "toggle")
+  Radio buttons. Caption: "Hold: press and hold Ctrl+Space while speaking.
+  Toggle: press once to start, press again to stop."
+
+PAGE 2 — "Choose transcription quality"
+  Option A: Fast   — "Faster, slightly less accurate"   (model_size = "tiny")
+  Option B: Balanced — "Recommended for most users"     (model_size = "base")  ← default
+  Option C: Accurate — "Most accurate, uses more CPU"   (model_size = "small")
+  Radio buttons.
+
+### What to write to config.json
+At install completion ([Code] CurStepChanged(ssPostInstall)), write
+%APPDATA%\Koda\config.json with the user's two answers merged into the
+DEFAULT_CONFIG from config.py. The config.json must be valid JSON — read
+DEFAULT_CONFIG from config.py (copy the dict inline in Pascal, or write a
+minimal JSON with just the two keys and let Koda's _deep_merge fill the rest
+on first run).
+
+Simplest approach: write a minimal config.json with only the two chosen keys:
+  {"hotkey_mode": "hold", "model_size": "base"}
+Koda's load_config() does _deep_merge(DEFAULT_CONFIG, user_config) so the
+rest of the defaults will be applied automatically on first run.
+
+The file goes to: ExpandConstant('{userappdata}') + '\Koda\config.json'
+Create the Koda directory if it doesn't exist.
+
+### Inno Setup implementation approach
+Use the [Code] section Pascal scripting. Inno Setup 6 supports custom wizard
+pages via CreateCustomPage / CreateInputOptionPage.
+
+Key Inno Setup functions:
+  CreateInputOptionPage(AfterID, Caption, SubCaption, Prompt, Exclusive, ListBox)
+  Page.Values[0] / Page.Values[1] — read radio button state
+  CurStepChanged(CurStep: TSetupStep) — hook for ssPostInstall
+  ExpandConstant('{userappdata}') — resolves to C:\Users\<user>\AppData\Roaming
+  SaveStringToFile(Filename, Content, Append) — write config.json
+  ForceDirectories(Dir) — create the Koda dir if needed
+
+Insert the pages after the existing [Tasks] page (PageID = wpSelectTasks).
+
+### Proposal rule
+Read the current installer/koda.iss first. Propose the Pascal code for the
+[Code] section and get approval before editing. Show what the two wizard pages
+will look like (describe each page's caption, sub-caption, and options).
+
+### After implementing
+1. Rebuild the installer: venv/Scripts/python installer/build_installer.py
+2. Run KodaSetup-4.2.0.exe — confirm the two new pages appear in the wizard
+3. Make a selection on each page, complete install
+4. Check %APPDATA%\Koda\config.json — verify hotkey_mode and model_size
+   reflect what you chose
+5. Launch Koda — confirm it starts with those settings (Settings window
+   should show the chosen model and hotkey mode)
+6. Test the other path too: run the installer again with different choices,
+   verify config.json updates correctly
+
+### Key files
+- installer/koda.iss          — the Inno Setup script to edit
+- config.py                   — DEFAULT_CONFIG reference (model_size, hotkey_mode)
+- %APPDATA%\Koda\config.json  — written at install time, read by Koda on launch
+
+### Current state
+- KodaSetup-4.2.0.exe was built on the work PC (C:\Users\alex\) 2026-04-14
+- Exe has the staleness fix (hotkey_service.py line 305)
+- No customization wizard pages yet — those are what this session adds
+- The existing [Tasks] in koda.iss (desktop shortcut + autostart) stay as-is
+
+Run /handover at session end.
+```
+
+---
+
+## OLDER PROMPTS (sessions 17–24)
+
 Copy the code block below and paste it into a new Claude Code session opened in the koda folder.
 
 ---
