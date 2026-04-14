@@ -1,7 +1,7 @@
 # Koda — Session Status
 
 > **Updated:** 2026-04-13 (Session 21)
-> **Version:** v4.2.0 | **Tests:** 187 passing (`test_features.py`) | **Branch:** master
+> **Version:** v4.2.0 | **Tests:** 208 passing (`test_features.py` + `test_e2e.py`) | **Branch:** master
 
 ---
 
