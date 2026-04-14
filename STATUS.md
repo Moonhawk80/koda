@@ -1,6 +1,6 @@
 # Koda — Session Status
 
-> **Updated:** 2026-04-13 (Session 21)
+> **Updated:** 2026-04-14 (Session 22)
 > **Version:** v4.2.0 | **Tests:** 208 passing (`test_features.py` + `test_e2e.py`) | **Branch:** master
 
 ---
@@ -13,16 +13,16 @@
 | 10 — Custom Vocabulary | DONE | Session 13, commit 68ce846 |
 | 11 — Per-App Profiles | DONE | Session 14, commit cd9d3c8 |
 | 12 — Filler Words + Snippets GUI | DONE | Session 17. Smoke test PASS. |
-| 13 — Installer / Distribution | IN PROGRESS | Koda.exe rebuilt (529MB). koda.iss has branding. Needs Inno Setup 6 to compile. |
+| 13 — Installer / Distribution | IN PROGRESS | KodaSetup-4.2.0.exe built (529MB). Pending: work PC install test, feature gates, license keys, LemonSqueezy, landing page. |
 
 ---
 
 ## Next Session Actions (Priority Order)
 
-1. **Phase 9 Test 3** — RDP: connect via RDP, verify Ctrl+Space fires (only thing left for phase 9)
-2. **Install Inno Setup 6** — https://jrsoftware.org/isdl.php — then run `python installer/build_installer.py`
-3. **Test KodaSetup.exe** — install on a fresh machine / work PC, verify wizard shows logo + branding
-4. **Verify Settings UI** — open Settings from tray, confirm tabs + light theme look correct
+1. **K1 cold boot result** — user rebooting at end of session 22; confirm keyboard doesn't freeze + transcription works
+2. **Test KodaSetup-4.2.0.exe on work PC** — verify wizard branding + hotkeys work post-install
+3. **RDP test** — Phase 9 Test 3; connect to home PC via RDP from work PC, verify Ctrl+Space fires
+4. **Phase 13 feature gates** — start free/Personal/Pro tier checks in code + license key system
 
 ---
 
