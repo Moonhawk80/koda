@@ -302,6 +302,7 @@ def service_main(conn, hotkey_config):
                         _quit.set()
                         break
                     elif cmd == "ping":
+                        _touch()   # prove message loop is alive; pong carries a fresh timestamp
                         with _last_key_lock:
                             last_t = _last_key[0]
                         _send(("pong", last_t))

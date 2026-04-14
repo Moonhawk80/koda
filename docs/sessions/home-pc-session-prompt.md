@@ -137,16 +137,54 @@ timeout constraint.
 - DO NOT change voice.py's side of the pipe — same protocol must be kept
 
 ### New implementation plan for hotkey_service.py
-1. RegisterHotKey for each hotkey (press/toggle detection)
-2. Hold mode releases: a minimal WH_KEYBOARD_LL hook ONLY for WM_KEYUP
-   on the trigger keys — no timing pressure, just checks key and sends event
-3. Win32 message loop: GetMessage() handles WM_HOTKEY (id→event name) and
-   WM_KEYUP from the companion hook
-4. Pipe commands: run a daemon thread that calls conn.recv() and posts
-   WM_APP+1 (0x8001) to the message loop thread via PostThreadMessage(),
-   passing the command through a thread-safe queue
-5. On "ping": send ("pong", last_key_mono) — same as current
-6. On "quit": UnregisterHotKey all, unhook WH_KEYBOARD_LL, exit cleanly
+
+**Main thread — Win32 message loop**
+GetMessage() handles:
+  WM_HOTKEY  (0x0312) → look up ID → send "dictation_press" / etc.
+  WM_APP+1   (0x8001) → read from thread-safe queue → process "ping" or "quit"
+  WM_QUIT             → break loop, clean up
+
+**Daemon thread — pipe reader**
+conn.recv() → puts command in queue → PostThreadMessage(main_thread_id, WM_APP+1)
+This lets blocking conn.recv() coexist with a message loop without polling.
+
+**Companion WH_KEYBOARD_LL hook — hold-mode releases only**
+RegisterHotKey only fires on keydown. For hold mode, need keyup on trigger key.
+SetWindowsHookExW(WH_KEYBOARD_LL, ...) watching ONLY WM_KEYUP on trigger VK codes.
+NOT the full keyboard library — just 3 keys max.
+Not needed for toggle mode.
+
+**Hotkey ID → event map (hold mode)**
+  1 → "dictation_press"     (dictation hotkey keydown)
+  2 → "command_press"       (command hotkey keydown)
+  3 → "prompt_press"        (prompt hotkey keydown)
+  4 → "correction"          (f7)
+  5 → "readback"            (f6)
+  6 → "readback_selected"   (f5)
+Toggle mode: same IDs, events become "dictation_toggle" etc., no companion hook.
+
+**Hotkey string → VK + modifiers parser**
+  "ctrl+space"  → MOD_CONTROL | MOD_NOREPEAT,           VK=0x20
+  "ctrl+alt+d"  → MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, VK=0x44
+  "f8"          → MOD_NOREPEAT,                          VK=0x77
+MOD_NOREPEAT on all — prevents WM_HOTKEY spam during hold.
+
+**_last_any_key_time staleness fix**
+RegisterHotKey doesn't receive every key press — only registered hotkeys.
+The 15-min staleness restart in voice.py would false-positive on an idle user.
+Fix: also update _last_any_key_time whenever "ping" is processed in the message
+loop. Pings arrive every ~30s from voice.py, so the staleness clock never goes
+stale as long as the message loop is alive — which is exactly what we want to prove.
+
+**Failure modes**
+RegisterHotKey fails (another app owns hotkey) → log error, send "hooks_dead"
+  → voice.py restarts and notifies user
+Companion hook dies → WM_HOTKEY press events still work; release events stop
+  until restart (voice.py watchdog handles this)
+
+**Protocol unchanged** — same pipe messages in/out. voice.py needs zero changes.
+After the rewrite, "Screen unlock detected — restarting hotkeys" should NEVER
+appear in debug.log since RegisterHotKey survives lock natively.
 
 ### RegisterHotKey constants
 MOD_ALT      = 0x0001
