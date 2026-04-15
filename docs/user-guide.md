@@ -208,6 +208,7 @@ Hold **Ctrl + Space**, speak your command naturally using words for symbols, the
 | What you say | What Koda types |
 |---|---|
 | cd slash users slash alex slash projects | `cd /users/alex/projects` |
+| cd backslash users backslash alex backslash projects | `cd \users\alex\projects` |
 | tilde slash projects slash koda | `~/projects/koda` |
 | git dash dash version | `git --version` |
 | npm install dash dash save dev | `npm install --save dev` |
@@ -238,6 +239,10 @@ Hold **Ctrl + Space**, speak your command naturally using words for symbols, the
 | dot dot slash | `../` |
 
 **Auto-capitalize is disabled in terminal mode** — "cd /users" stays lowercase, not "Cd /users".
+
+> **Windows paths use backslash** — say "backslash" for `\`. Unix paths (WSL, Git Bash) use "slash" for `/`.
+
+> **Using Koda inside Claude Code or another CLI tool?** Terminal mode will activate there too. For regular prose dictation in a terminal (not shell commands), use **F8 (Command mode)** instead of Ctrl+Space — Command mode skips terminal detection.
 
 ---
 

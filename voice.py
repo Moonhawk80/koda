@@ -711,8 +711,7 @@ def _transcribe_and_paste():
             try:
                 proc_name, win_title = get_active_window_info()
                 _in_terminal = is_terminal_app(proc_name, win_title)
-                if _in_terminal:
-                    logger.debug("Terminal mode active: proc=%r title=%r", proc_name, win_title)
+                logger.debug("Terminal check: proc=%r title=%r detected=%s", proc_name, win_title, _in_terminal)
             except Exception as e:
                 logger.debug("Terminal mode check error: %s", e)
 
