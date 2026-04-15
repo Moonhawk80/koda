@@ -32,6 +32,7 @@ from text_processing import (
 from voice_commands import extract_and_execute_commands
 from profiles import match_profile, deep_merge
 from formula_mode import convert_to_formula, is_formula_app, execute_excel_action, _normalize, _try_navigate, _try_create_table
+from terminal_mode import is_terminal_app, normalize_for_terminal
 
 
 # ============================================================
@@ -1810,6 +1811,210 @@ class TestExecuteExcelActionWithMockExcel(unittest.TestCase):
     def test_if_formula_not_consumed_by_action(self):
         result, _ = self._run("if A1 is greater than 10 then yes else no")
         self.assertFalse(result)
+
+
+# ============================================================
+# Terminal Mode
+# ============================================================
+
+class TestTerminalAppDetection(unittest.TestCase):
+    """Tests for is_terminal_app() window detection."""
+
+    def test_windows_terminal(self):
+        self.assertTrue(is_terminal_app("WindowsTerminal.exe", "Windows Terminal"))
+
+    def test_powershell_process(self):
+        self.assertTrue(is_terminal_app("powershell.exe", "Windows PowerShell"))
+
+    def test_powershell_core(self):
+        self.assertTrue(is_terminal_app("pwsh.exe", "PowerShell 7"))
+
+    def test_cmd(self):
+        self.assertTrue(is_terminal_app("cmd.exe", "Command Prompt"))
+
+    def test_cmd_admin(self):
+        self.assertTrue(is_terminal_app("cmd.exe", "Administrator: Command Prompt"))
+
+    def test_git_bash(self):
+        self.assertTrue(is_terminal_app("bash.exe", "Git Bash"))
+
+    def test_mintty(self):
+        self.assertTrue(is_terminal_app("mintty.exe", "MINGW64:/c/Users/alex"))
+
+    def test_wsl_title(self):
+        self.assertTrue(is_terminal_app("bash.exe", "Ubuntu - WSL"))
+
+    def test_powershell_title_only(self):
+        self.assertTrue(is_terminal_app("chrome.exe", "PowerShell"))
+
+    def test_terminal_title_only(self):
+        self.assertTrue(is_terminal_app("alacritty.exe", "Terminal"))
+
+    def test_not_terminal_notepad(self):
+        self.assertFalse(is_terminal_app("notepad.exe", "Untitled - Notepad"))
+
+    def test_not_terminal_excel(self):
+        self.assertFalse(is_terminal_app("excel.exe", "Budget.xlsx - Excel"))
+
+    def test_not_terminal_browser(self):
+        self.assertFalse(is_terminal_app("chrome.exe", "GitHub - Google Chrome"))
+
+    def test_not_terminal_word(self):
+        self.assertFalse(is_terminal_app("winword.exe", "Document1 - Word"))
+
+    def test_case_insensitive_process(self):
+        self.assertTrue(is_terminal_app("POWERSHELL.EXE", "Windows PowerShell"))
+
+
+class TestTerminalNormalize(unittest.TestCase):
+    """Tests for normalize_for_terminal() symbol conversion."""
+
+    # --- Path navigation ---
+    def test_cd_slash_path(self):
+        self.assertEqual(
+            normalize_for_terminal("cd slash users slash alex"),
+            "cd /users/alex",
+        )
+
+    def test_tilde_path(self):
+        self.assertEqual(
+            normalize_for_terminal("tilde slash projects slash koda"),
+            "~/projects/koda",
+        )
+
+    def test_dot_dot_slash(self):
+        self.assertEqual(normalize_for_terminal("dot dot slash src"), "../src")
+
+    def test_dot_slash(self):
+        self.assertEqual(normalize_for_terminal("dot slash build"), "./build")
+
+    def test_dot_dot_only(self):
+        self.assertEqual(normalize_for_terminal("cd dot dot"), "cd ..")
+
+    def test_forward_slash(self):
+        self.assertEqual(normalize_for_terminal("forward slash etc slash hosts"), "/etc/hosts")
+
+    # --- Flags ---
+    def test_double_dash_flag(self):
+        self.assertEqual(normalize_for_terminal("git dash dash version"), "git --version")
+
+    def test_double_dash_flag_multiword(self):
+        self.assertEqual(
+            normalize_for_terminal("npm install dash dash save dev"),
+            "npm install --save dev",
+        )
+
+    def test_single_letter_flag(self):
+        self.assertEqual(normalize_for_terminal("ls dash l"), "ls -l")
+
+    def test_single_letter_flag_v(self):
+        self.assertEqual(normalize_for_terminal("python dash v"), "python -v")
+
+    def test_multiple_single_flags(self):
+        result = normalize_for_terminal("ls dash l dash a")
+        self.assertIn("-l", result)
+        self.assertIn("-a", result)
+
+    def test_double_dash_keyword(self):
+        self.assertEqual(normalize_for_terminal("double dash verbose"), "--verbose")
+
+    # --- Pipe and redirect ---
+    def test_pipe(self):
+        self.assertEqual(
+            normalize_for_terminal("echo hello pipe grep world"),
+            "echo hello | grep world",
+        )
+
+    def test_greater_than_redirect(self):
+        result = normalize_for_terminal("echo hello greater than output")
+        self.assertIn(">", result)
+
+    def test_double_greater_than_append(self):
+        result = normalize_for_terminal("echo hello double greater than output")
+        self.assertIn(">>", result)
+
+    def test_and_and(self):
+        result = normalize_for_terminal("cd slash tmp and and ls")
+        self.assertIn("&&", result)
+
+    def test_double_ampersand(self):
+        result = normalize_for_terminal("make double ampersand make install")
+        self.assertIn("&&", result)
+
+    # --- File extensions ---
+    def test_dot_extension_txt(self):
+        self.assertEqual(normalize_for_terminal("cat file dot txt"), "cat file.txt")
+
+    def test_dot_extension_py(self):
+        self.assertEqual(normalize_for_terminal("python script dot py"), "python script.py")
+
+    def test_dot_extension_md(self):
+        self.assertEqual(normalize_for_terminal("cat readme dot md"), "cat readme.md")
+
+    # --- Tilde and dollar ---
+    def test_tilde_home(self):
+        result = normalize_for_terminal("cd tilde")
+        self.assertIn("~", result)
+
+    def test_dollar_sign(self):
+        result = normalize_for_terminal("echo dollar sign home")
+        self.assertIn("$", result)
+
+    def test_dollar_alone(self):
+        result = normalize_for_terminal("echo dollar PATH")
+        self.assertIn("$", result)
+
+    # --- Backslash (Windows paths) ---
+    def test_backslash(self):
+        result = normalize_for_terminal("cd C colon backslash users backslash alex")
+        self.assertIn("\\", result)
+
+    def test_back_slash_two_words(self):
+        result = normalize_for_terminal("back slash windows backslash system32")
+        self.assertIn("\\", result)
+
+    # --- No mangling of normal commands ---
+    def test_plain_git_command_unchanged(self):
+        result = normalize_for_terminal("git status")
+        self.assertEqual(result, "git status")
+
+    def test_plain_cd_unchanged(self):
+        result = normalize_for_terminal("cd projects")
+        self.assertEqual(result, "cd projects")
+
+    def test_empty_string(self):
+        self.assertEqual(normalize_for_terminal(""), "")
+
+    def test_no_symbols_unchanged(self):
+        result = normalize_for_terminal("npm install")
+        self.assertEqual(result, "npm install")
+
+    # --- Auto-capitalize is NOT applied (caller responsibility, tested via config) ---
+    def test_output_starts_lowercase(self):
+        # normalize_for_terminal itself doesn't change case — it's on the caller
+        # to disable auto_capitalize before calling. Verify the function preserves case.
+        result = normalize_for_terminal("git status")
+        self.assertTrue(result[0].islower())
+
+    # --- Combined real-world phrases ---
+    def test_full_cd_command(self):
+        result = normalize_for_terminal("cd slash users slash alex slash projects slash koda")
+        self.assertEqual(result, "cd /users/alex/projects/koda")
+
+    def test_git_clone(self):
+        result = normalize_for_terminal("git clone dash dash depth 1")
+        self.assertIn("--depth", result)
+
+    def test_find_command(self):
+        result = normalize_for_terminal("find dot dash name star dot py")
+        self.assertIn(".", result)
+        self.assertIn("*", result)
+        self.assertIn(".py", result)
+
+    def test_pipe_chain(self):
+        result = normalize_for_terminal("cat log dot txt pipe grep error pipe head dash n 20")
+        self.assertIn("|", result)
+        self.assertIn(".txt", result)
 
 
 if __name__ == "__main__":
