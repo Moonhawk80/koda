@@ -30,7 +30,8 @@ from text_processing import process_text, apply_custom_vocabulary
 from history import init_db, save_transcription
 from overlay import KodaOverlay
 from profiles import ProfileMonitor, get_active_window_info
-from formula_mode import convert_to_formula, is_formula_app
+from formula_mode import convert_to_formula, is_formula_app, execute_excel_action
+from terminal_mode import is_terminal_app, normalize_for_terminal
 from voice_commands import extract_and_execute_commands
 from stats import init_stats_db as init_stats, log_transcription_stats, log_command_stats
 from plugin_manager import PluginManager
@@ -681,6 +682,16 @@ def _transcribe_and_paste():
                 _in_formula_app = False
             if _in_formula_app:
                 update_tray("#f39c12", "Koda: Formula mode...")
+                # Try COM actions first (navigation, table creation — Pro tier)
+                if execute_excel_action(text):
+                    play_success_sound()
+                    try:
+                        save_transcription(f"[excel: {text}]", recording_mode, time.time() - rec_start)
+                    except Exception:
+                        pass
+                    update_tray("#2ecc71", "Koda: Ready")
+                    return
+                # Fall through to formula conversion
                 llm_enabled = config.get("llm_polish", {}).get("enabled", False)
                 llm_cfg = config.get("llm_polish", {}) if llm_enabled else None
                 formula = convert_to_formula(text, llm_enabled=llm_enabled, llm_config=llm_cfg)
@@ -694,17 +705,35 @@ def _transcribe_and_paste():
             # LLM polish for command mode
             processed = polish_with_llm(processed)
         else:
+            # Check for terminal mode before processing — disables auto-capitalize/format
+            # so shell commands don't get capitalized or punctuated
+            _in_terminal = False
+            try:
+                proc_name, win_title = get_active_window_info()
+                _in_terminal = is_terminal_app(proc_name, win_title)
+                if _in_terminal:
+                    logger.debug("Terminal mode active: proc=%r title=%r", proc_name, win_title)
+            except Exception as e:
+                logger.debug("Terminal mode check error: %s", e)
+
             light_config = {
                 "post_processing": {
                     "remove_filler_words": config.get("post_processing", {}).get("remove_filler_words", True),
                     "code_vocabulary": False,
-                    "auto_capitalize": config.get("post_processing", {}).get("auto_capitalize", True),
-                    "auto_format": config.get("post_processing", {}).get("auto_format", True),
+                    # Disable in terminal — "cd /users" must not become "Cd /users"
+                    "auto_capitalize": False if _in_terminal else config.get("post_processing", {}).get("auto_capitalize", True),
+                    # Disable in terminal — trailing periods break shell commands
+                    "auto_format": False if _in_terminal else config.get("post_processing", {}).get("auto_format", True),
                 },
                 "custom_vocabulary": custom_vocab,
                 "snippets": config.get("snippets", {}),
             }
             processed = process_text(text, light_config)
+
+            if _in_terminal:
+                update_tray("#f39c12", "Koda: Terminal mode...")
+                processed = normalize_for_terminal(processed)
+                update_tray("#2ecc71", "Koda: Ready")
 
         # Run plugin text processors
         if plugins.loaded:

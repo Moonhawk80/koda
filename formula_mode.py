@@ -1,9 +1,14 @@
 """
-Formula mode for Koda — converts natural language descriptions to Excel/Sheets formulas.
+Formula mode for Koda — converts natural language descriptions to Excel/Sheets formulas,
+and executes direct Excel actions (navigation, table creation) via COM automation.
 
-Two-tier conversion:
+Two-tier formula conversion:
   Tier 1 — Rules-based (always available, covers common formulas)
   Tier 2 — Ollama LLM fallback (if llm_polish.enabled = true in config)
+
+Excel actions (Pro tier):
+  - Cell/column/row navigation ("go to B5", "select column C")
+  - Table creation ("create a table", "make a table with columns Name Date Amount")
 """
 
 import re
@@ -50,6 +55,14 @@ def _normalize(text: str) -> str:
         word = m.group(1).lower()
         return "column " + _PHONETIC_LETTERS.get(word, word)
     t = re.sub(r'\bcolumn\s+(\w+)', _replace_phonetic, t, flags=re.IGNORECASE)
+    # Replace phonetic letter + row number for cell references: "bee 5" → "B5"
+    # Handles navigation phrases like "go to bee 5" → "go to B5"
+    def _replace_phonetic_cell_ref(m):
+        letter = _PHONETIC_LETTERS.get(m.group(1).lower())
+        if letter:
+            return letter + m.group(2)
+        return m.group(0)
+    t = re.sub(r'\b([A-Za-z]+)\s+(\d+)\b', _replace_phonetic_cell_ref, t, flags=re.IGNORECASE)
     return t
 
 
@@ -83,6 +96,145 @@ def convert_to_formula(text: str, llm_enabled: bool = False, llm_config: dict = 
         return result
 
     return None
+
+
+# ---------------------------------------------------------------------------
+# Excel COM action helpers (Pro tier — navigation + table creation)
+# ---------------------------------------------------------------------------
+
+def _get_excel():
+    """Return the active Excel Application COM object, or None if Excel isn't running."""
+    try:
+        import win32com.client
+        return win32com.client.GetActiveObject("Excel.Application")
+    except Exception:
+        return None
+
+
+def _try_navigate(xl, text: str) -> bool:
+    """Parse and execute a cell/column/row navigation command. Returns True if executed."""
+    tl = text.strip().lower()
+
+    # "go to B5" / "navigate to B5" / "jump to B5" / "move to B5" / "select B5"
+    m = re.match(
+        r'^(?:go\s+to|navigate\s+to|jump\s+to|move\s+to|select)\s+([A-Za-z]+\d+)$', tl
+    )
+    if m:
+        xl.ActiveSheet.Range(m.group(1).upper()).Select()
+        return True
+
+    # "select column C" / "go to column C" / "highlight column C"
+    m = re.match(
+        r'^(?:select|go\s+to|highlight|navigate\s+to)\s+column\s+([A-Za-z]+)$', tl
+    )
+    if m:
+        xl.ActiveSheet.Columns(m.group(1).upper()).Select()
+        return True
+
+    # "select row 5" / "go to row 5" / "navigate to row 5"
+    m = re.match(
+        r'^(?:select|go\s+to|navigate\s+to)\s+row\s+(\d+)$', tl
+    )
+    if m:
+        xl.ActiveSheet.Rows(int(m.group(1))).Select()
+        return True
+
+    # "go home" / "go to A1" / "go to first cell" / "go to the top"
+    if re.match(
+        r'^(?:go\s+home|go\s+to\s+a1|go\s+to\s+(?:the\s+)?(?:first\s+cell|beginning|start|top))$',
+        tl,
+    ):
+        xl.ActiveSheet.Range("A1").Select()
+        return True
+
+    # "go to last row" / "go to the last row" / "go to the bottom" / "go to end"
+    if re.match(r'^go\s+to\s+(?:the\s+)?(?:last\s+row|end|bottom)$', tl):
+        last_row = xl.ActiveSheet.UsedRange.Rows.Count
+        xl.ActiveSheet.Cells(last_row, 1).Select()
+        return True
+
+    # "select all" / "select everything" / "select all data"
+    if re.match(r'^select\s+(?:all|everything|all\s+data)$', tl):
+        xl.ActiveSheet.UsedRange.Select()
+        return True
+
+    return False
+
+
+def _try_create_table(xl, text: str) -> bool:
+    """Parse and execute table creation commands. Returns True if executed."""
+    tl = text.strip().lower()
+
+    # "create a table with columns Name Date Amount" (writes headers then creates table)
+    m = re.match(
+        r'^(?:create|make|insert)\s+(?:a\s+)?table\s+with\s+(?:columns?\s+)?(.+)$', tl
+    )
+    if m:
+        raw = m.group(1)
+        # Split on comma, "and", or whitespace
+        headers = [h.strip().title() for h in re.split(r'\s*(?:,|and)\s*|\s+', raw) if h.strip()]
+        if not headers:
+            return False
+        ws = xl.ActiveSheet
+        row = xl.ActiveCell.Row
+        col = xl.ActiveCell.Column
+        for i, header in enumerate(headers):
+            ws.Cells(row, col + i).Value = header
+        rng = ws.Range(ws.Cells(row, col), ws.Cells(row, col + len(headers) - 1))
+        try:
+            ws.ListObjects.Add(1, rng, None, 1)  # xlSrcRange=1, xlYes headers=1
+            logger.debug("Excel action: created table with headers %s", headers)
+            return True
+        except Exception as e:
+            logger.debug("Table creation with headers failed: %s", e)
+            return False
+
+    # "create a table" / "make a table" / "make this a table" / "format as table" / "insert table"
+    if re.match(
+        r'^(?:create|make|insert|format\s+as)\s+(?:a\s+|this\s+(?:as\s+)?a?\s*)?table$', tl
+    ):
+        ws = xl.ActiveSheet
+        selection = xl.Selection
+        try:
+            ws.ListObjects.Add(1, selection, None, 1)
+            logger.debug("Excel action: created table from selection")
+            return True
+        except Exception as e:
+            logger.debug("Table creation from selection failed: %s", e)
+            return False
+
+    return False
+
+
+def execute_excel_action(text: str) -> bool:
+    """
+    Try to execute a direct Excel COM action (navigation or table creation).
+
+    Tries full text first, then strips up to 3 leading words (same hallucination
+    handling as convert_to_formula). Returns True if an action was executed.
+
+    Pro tier feature — requires Excel to be the active application.
+    """
+    normalized = _normalize(text)
+    words = normalized.split()
+
+    xl = _get_excel()
+    if xl is None:
+        logger.debug("Excel action: no running Excel instance found via COM")
+        return False
+
+    for i in range(min(4, len(words))):
+        candidate = " ".join(words[i:])
+        if _try_navigate(xl, candidate):
+            if i > 0:
+                logger.debug("Excel action: navigation matched after stripping %d word(s): %r", i, candidate)
+            return True
+        if _try_create_table(xl, candidate):
+            if i > 0:
+                logger.debug("Excel action: table matched after stripping %d word(s): %r", i, candidate)
+            return True
+
+    return False
 
 
 # ---------------------------------------------------------------------------
