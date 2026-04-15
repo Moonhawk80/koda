@@ -30,7 +30,7 @@ from text_processing import process_text, apply_custom_vocabulary
 from history import init_db, save_transcription
 from overlay import KodaOverlay
 from profiles import ProfileMonitor, get_active_window_info
-from formula_mode import convert_to_formula, is_formula_app
+from formula_mode import convert_to_formula, is_formula_app, execute_excel_action
 from voice_commands import extract_and_execute_commands
 from stats import init_stats_db as init_stats, log_transcription_stats, log_command_stats
 from plugin_manager import PluginManager
@@ -681,6 +681,16 @@ def _transcribe_and_paste():
                 _in_formula_app = False
             if _in_formula_app:
                 update_tray("#f39c12", "Koda: Formula mode...")
+                # Try COM actions first (navigation, table creation — Pro tier)
+                if execute_excel_action(text):
+                    play_success_sound()
+                    try:
+                        save_transcription(f"[excel: {text}]", recording_mode, time.time() - rec_start)
+                    except Exception:
+                        pass
+                    update_tray("#2ecc71", "Koda: Ready")
+                    return
+                # Fall through to formula conversion
                 llm_enabled = config.get("llm_polish", {}).get("enabled", False)
                 llm_cfg = config.get("llm_polish", {}) if llm_enabled else None
                 formula = convert_to_formula(text, llm_enabled=llm_enabled, llm_config=llm_cfg)
