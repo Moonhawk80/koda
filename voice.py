@@ -669,6 +669,7 @@ def _transcribe_and_paste():
             return
 
         # Post-processing
+        _in_terminal = False  # may be set to True inside the else branch below
         if recording_mode == "prompt":
             if custom_vocab:
                 text = apply_custom_vocabulary(text, custom_vocab)
@@ -707,7 +708,6 @@ def _transcribe_and_paste():
         else:
             # Check for terminal mode before processing — disables auto-capitalize/format
             # so shell commands don't get capitalized or punctuated
-            _in_terminal = False
             try:
                 proc_name, win_title = get_active_window_info()
                 _in_terminal = is_terminal_app(proc_name, win_title)
@@ -751,7 +751,7 @@ def _transcribe_and_paste():
 
             # Check for voice editing commands (e.g. "select all", "undo")
             if config.get("voice_commands", True):
-                processed, cmds = extract_and_execute_commands(processed)
+                processed, cmds = extract_and_execute_commands(processed, in_terminal=_in_terminal)
                 if cmds and not processed:
                     # Entire utterance was a command — no text to paste
                     play_success_sound()

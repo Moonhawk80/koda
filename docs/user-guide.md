@@ -278,6 +278,18 @@ While holding **Ctrl + Space** (or F8 for command mode), speak these commands to
 | go to the end | Ctrl+End |
 | go home | Ctrl+Home |
 
+### In a terminal window
+
+Terminal shortcuts are different from text editor shortcuts — Koda automatically uses the right ones when a terminal is the active window:
+
+| Say | Terminal action | Why it's different |
+|---|---|---|
+| select all | Clears the whole command line | `Ctrl+A` in a terminal moves to start of line, not select |
+| delete / delete that | `Ctrl+K` — kills to end of line | Forward Delete does nothing without a selection |
+| delete the word | `Ctrl+W` — readline word delete | `Ctrl+Backspace` is less reliable in terminals |
+| delete line | Clears the whole command line | Same as select all |
+| new line | Enter (runs the command) | Same as GUI |
+
 ---
 
 ## Troubleshooting

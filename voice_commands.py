@@ -62,6 +62,38 @@ def _action_delete_line():
     keyboard.send("shift+end")
     keyboard.send("delete")
 
+
+# --- Terminal-mode overrides ---
+# Readline/shell shortcuts replace GUI equivalents when active window is a terminal.
+# "select all" → Ctrl+A in GUI means select all; in terminals it means BOL. Clear
+# the whole command line instead (Ctrl+E to EOL, then Ctrl+U to kill to BOL).
+# "delete" → Forward-Delete does nothing in terminal without a selection. Ctrl+K
+# kills from cursor to end of line, which is the most useful equivalent.
+
+def _action_terminal_clear_line():
+    """Clear entire command line: go to EOL then kill to BOL."""
+    keyboard.send("ctrl+e")
+    keyboard.send("ctrl+u")
+
+def _action_terminal_kill_end():
+    """Kill from cursor to end of line (readline Ctrl+K)."""
+    keyboard.send("ctrl+k")
+
+def _action_terminal_delete_word():
+    """Delete word before cursor (readline Ctrl+W)."""
+    keyboard.send("ctrl+w")
+
+
+# Maps command description → terminal override action.
+# Only commands that behave differently in a terminal need an entry here.
+TERMINAL_OVERRIDES = {
+    "Select all text":            _action_terminal_clear_line,
+    "Delete selection/last text": _action_terminal_kill_end,
+    "Delete forward":             _action_terminal_kill_end,
+    "Delete current line":        _action_terminal_clear_line,
+    "Delete previous word":       _action_terminal_delete_word,
+}
+
 def _action_enter():
     keyboard.send("enter")
 
@@ -203,8 +235,13 @@ def register_extra_commands(commands):
         )
 
 
-def extract_and_execute_commands(text):
+def extract_and_execute_commands(text, in_terminal=False):
     """Check if text contains voice commands. Execute them and return remaining text.
+
+    Args:
+        text: transcribed text to scan for commands
+        in_terminal: if True, use terminal-appropriate key actions (readline shortcuts)
+                     instead of GUI shortcuts for commands that differ in a terminal.
 
     Returns:
         (remaining_text, commands_executed) — remaining_text is empty string if the
@@ -213,6 +250,12 @@ def extract_and_execute_commands(text):
     if not text:
         return text, []
 
+    def _run(action, desc):
+        if in_terminal and desc in TERMINAL_OVERRIDES:
+            TERMINAL_OVERRIDES[desc]()
+        else:
+            action()
+
     executed = []
     original = text.strip()
 
@@ -220,7 +263,7 @@ def extract_and_execute_commands(text):
     for pattern, action, desc in _COMPILED_COMMANDS:
         if pattern.match(original):
             time.sleep(0.1)  # Small delay for focus
-            action()
+            _run(action, desc)
             executed.append(desc)
             return "", executed
 
@@ -228,7 +271,7 @@ def extract_and_execute_commands(text):
     for pattern, action, desc in _PREFIX_COMMANDS:
         match = pattern.match(text)
         if match:
-            action()
+            _run(action, desc)
             executed.append(desc)
             text = text[match.end():].strip()
             break
@@ -237,7 +280,7 @@ def extract_and_execute_commands(text):
     for pattern, action, desc in _SUFFIX_COMMANDS:
         match = pattern.search(text)
         if match:
-            action()
+            _run(action, desc)
             executed.append(desc)
             text = text[:match.start()].strip()
             break

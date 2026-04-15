@@ -395,6 +395,41 @@ class TestVoiceCommands(unittest.TestCase):
         self.assertEqual(text, "")
         self.assertEqual(len(cmds), 1)
 
+    @patch("voice_commands.keyboard")
+    def test_terminal_select_all_clears_line(self, mock_keyboard):
+        """In terminal, 'select all' clears the command line instead of Ctrl+A."""
+        text, cmds = extract_and_execute_commands("select all", in_terminal=True)
+        self.assertEqual(text, "")
+        self.assertEqual(len(cmds), 1)
+        # Should use readline clear-line (Ctrl+E then Ctrl+U), not Ctrl+A
+        calls = [c.args[0] for c in mock_keyboard.send.call_args_list]
+        self.assertIn("ctrl+e", calls)
+        self.assertIn("ctrl+u", calls)
+        self.assertNotIn("ctrl+a", calls)
+
+    @patch("voice_commands.keyboard")
+    def test_terminal_delete_kills_to_eol(self, mock_keyboard):
+        """In terminal, 'delete' kills to end of line (Ctrl+K) instead of Forward Delete."""
+        text, cmds = extract_and_execute_commands("delete", in_terminal=True)
+        self.assertEqual(text, "")
+        self.assertEqual(len(cmds), 1)
+        mock_keyboard.send.assert_called_with("ctrl+k")
+
+    @patch("voice_commands.keyboard")
+    def test_terminal_delete_word_uses_ctrl_w(self, mock_keyboard):
+        """In terminal, 'delete word' uses Ctrl+W (readline) instead of Ctrl+Backspace."""
+        text, cmds = extract_and_execute_commands("delete word", in_terminal=True)
+        self.assertEqual(text, "")
+        self.assertEqual(len(cmds), 1)
+        mock_keyboard.send.assert_called_with("ctrl+w")
+
+    @patch("voice_commands.keyboard")
+    def test_gui_select_all_unchanged(self, mock_keyboard):
+        """Outside terminal, 'select all' still sends Ctrl+A."""
+        text, cmds = extract_and_execute_commands("select all", in_terminal=False)
+        self.assertEqual(text, "")
+        mock_keyboard.send.assert_called_with("ctrl+a")
+
 
 # ============================================================
 # Profile Matching
