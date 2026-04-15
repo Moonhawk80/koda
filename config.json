@@ -30,7 +30,7 @@
     "enabled": false,
     "model": "phi3:mini"
   },
-  "overlay_enabled": true,
+  "overlay_enabled": false,
   "output_mode": "auto_paste",
   "streaming": true,
   "profiles_enabled": true,

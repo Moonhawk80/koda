@@ -669,11 +669,26 @@ def _transcribe_and_paste():
 
         # Post-processing
         if recording_mode == "prompt":
-            # Prompt Assist mode — apply custom vocab then structure into an effective LLM prompt
             if custom_vocab:
                 text = apply_custom_vocabulary(text, custom_vocab)
-            update_tray("#f39c12", "Koda: Refining prompt...")
-            processed = refine_prompt(text, config)
+            # Formula mode: if F9 pressed while Excel/Sheets is active, convert to formula
+            try:
+                proc_name, win_title = get_active_window_info()
+                _in_formula_app = is_formula_app(proc_name, win_title)
+                logger.debug("Formula check: proc=%r title=%r in_formula_app=%s", proc_name, win_title, _in_formula_app)
+            except Exception as e:
+                logger.debug("Formula check error: %s", e)
+                _in_formula_app = False
+            if _in_formula_app:
+                update_tray("#f39c12", "Koda: Formula mode...")
+                llm_enabled = config.get("llm_polish", {}).get("enabled", False)
+                llm_cfg = config.get("llm_polish", {}) if llm_enabled else None
+                formula = convert_to_formula(text, llm_enabled=llm_enabled, llm_config=llm_cfg)
+                processed = formula if formula is not None else text
+            else:
+                # Prompt Assist mode — structure speech into an effective LLM prompt
+                update_tray("#f39c12", "Koda: Refining prompt...")
+                processed = refine_prompt(text, config)
         elif recording_mode == "command":
             processed = process_text(text, config)
             # LLM polish for command mode
@@ -721,19 +736,6 @@ def _transcribe_and_paste():
                     update_tray("#2ecc71", "Koda: Ready")
                     return
 
-            # Formula mode: if active window is Excel/Sheets and formula mode enabled
-            if config.get("formula_mode", {}).get("enabled", False):
-                try:
-                    proc_name, win_title = get_active_window_info()
-                    if is_formula_app(proc_name, win_title):
-                        llm_enabled = config.get("llm_polish", {}).get("enabled", False)
-                        llm_cfg = config.get("llm_polish", {}) if llm_enabled else None
-                        formula = convert_to_formula(processed, llm_enabled=llm_enabled, llm_config=llm_cfg)
-                        if formula is not None:
-                            processed = formula
-                except Exception as e:
-                    logger.debug("Formula mode error: %s", e)
-
             last_transcription = processed
 
             output_mode = config.get("output_mode", "auto_paste")
@@ -755,7 +757,6 @@ def _transcribe_and_paste():
                 prof_name = ""
                 if profile_monitor:
                     try:
-                        from profiles import get_active_window_info
                         app_name, _ = get_active_window_info()
                         prof_name = profile_monitor.current_profile or ""
                     except Exception as e:
@@ -1314,12 +1315,17 @@ def build_menu():
     hotkey_cmd  = config.get("hotkey_command", "f8").upper()
     mode        = config.get("hotkey_mode", "hold")
     mode_label  = "Hold-to-talk" if mode == "hold" else "Toggle"
+    output_mode = config.get("output_mode", "auto_paste")
 
     tools_menu = pystray.Menu(
         pystray.MenuItem("Transcribe audio file",           lambda icon, item: _open_transcribe_file()),
         pystray.MenuItem("Install Explorer right-click",    lambda icon, item: _install_context_menu()),
         pystray.MenuItem("Usage stats",                     lambda icon, item: _open_stats()),
     )
+
+    voice_menu       = pystray.Menu(*_build_voice_menu_items())
+    speed_menu       = pystray.Menu(*_build_speed_menu_items())
+    translation_menu = pystray.Menu(*_build_translation_menu_items())
 
     return pystray.Menu(
         pystray.MenuItem(f"Koda v{VERSION}  —  {hotkey_dict} dictation  |  {hotkey_cmd} command  |  {mode_label}", None, enabled=False),
@@ -1339,10 +1345,14 @@ def build_menu():
             switch_mode,
         ),
         pystray.MenuItem(
-            "Floating overlay",
-            toggle_overlay,
-            checked=lambda item: overlay is not None and overlay.is_visible,
+            "Paste into active window" if output_mode == "auto_paste" else "Clipboard only (no paste)",
+            toggle_output_mode,
+            checked=lambda item: config.get("output_mode", "auto_paste") == "auto_paste",
         ),
+        pystray.Menu.SEPARATOR,
+        pystray.MenuItem("Read-back voice",  voice_menu),
+        pystray.MenuItem("Read-back speed",  speed_menu),
+        pystray.MenuItem("Translation",      translation_menu),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem("Settings",    lambda icon, item: _open_settings_gui()),
         pystray.MenuItem("Tools",       tools_menu),

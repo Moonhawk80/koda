@@ -30,6 +30,29 @@ def is_formula_app(process_name: str, window_title: str) -> bool:
     return False
 
 
+# Single-letter phonetic names Whisper produces instead of the letter itself
+_PHONETIC_LETTERS = {
+    "ay": "A", "bee": "B", "see": "C", "dee": "D", "ee": "E",
+    "ef": "F", "eff": "F", "gee": "G", "aitch": "H", "eye": "I",
+    "jay": "J", "kay": "K", "el": "L", "em": "M", "en": "N",
+    "oh": "O", "pee": "P", "queue": "Q", "are": "R", "ess": "S",
+    "tee": "T", "you": "U", "vee": "V", "double you": "W",
+    "ex": "X", "why": "Y", "zee": "Z", "zed": "Z",
+}
+
+
+def _normalize(text: str) -> str:
+    """Strip trailing punctuation and replace phonetic letter names with actual letters."""
+    t = text.strip().rstrip(".,!?;:")
+    # Replace phonetic column letters: "column see" → "column C"
+    # Only replace when preceded by "column" to avoid clobbering words like "see you"
+    def _replace_phonetic(m):
+        word = m.group(1).lower()
+        return "column " + _PHONETIC_LETTERS.get(word, word)
+    t = re.sub(r'\bcolumn\s+(\w+)', _replace_phonetic, t, flags=re.IGNORECASE)
+    return t
+
+
 def convert_to_formula(text: str, llm_enabled: bool = False, llm_config: dict = None) -> str | None:
     """
     Convert natural language text to an Excel formula.
@@ -37,13 +60,24 @@ def convert_to_formula(text: str, llm_enabled: bool = False, llm_config: dict = 
     Returns:
         Formula string starting with '=' if matched, else None (use raw text).
     """
-    result = _rules_convert(text)
-    if result is not None:
-        logger.debug("Formula mode: rules match %r -> %r", text, result)
-        return result
+    normalized = _normalize(text)
+
+    # Try full text first, then progressively strip leading words.
+    # This handles Whisper hallucinations at the start (e.g. "Alt Funding sum column C")
+    # and mishearings like "some total" where stripping "some" leaves "total of column C".
+    words = normalized.split()
+    for i in range(min(4, len(words))):
+        candidate = " ".join(words[i:])
+        result = _rules_convert(candidate)
+        if result is not None:
+            if i > 0:
+                logger.debug("Formula mode: stripped %d leading word(s), matched %r -> %r", i, candidate, result)
+            else:
+                logger.debug("Formula mode: rules match %r -> %r", text, result)
+            return result
 
     if llm_enabled and llm_config:
-        result = _llm_convert(text, llm_config)
+        result = _llm_convert(normalized, llm_config)
         if result is not None:
             logger.debug("Formula mode: LLM match %r -> %r", text, result)
         return result
@@ -79,6 +113,12 @@ def _extract_range(text: str) -> str | None:
     if m:
         return f"{m.group(1).upper()}:{m.group(2).upper()}"
 
+    # Whole column: "column C" / "column C" anywhere in text (e.g. "the totals of column C")
+    m = re.search(r'column\s+([A-Za-z]+)(?:\s|$)', text, re.IGNORECASE)
+    if m:
+        col = m.group(1).upper()
+        return f"{col}:{col}"
+
     return None
 
 
@@ -108,72 +148,85 @@ def _rules_convert(text: str) -> str | None:
         return "=NOW()"
 
     # --- SUM ---
-    m = re.match(r"^(?:sum|total|add up|add)\s+(.+)$", tl)
+    m = re.match(r"^(?:what'?s\s+)?(?:the\s+)?(?:sum|total|add up|add)\s+(?:of\s+|up\s+)?(.+)$", tl)
     if m:
         rng = _extract_range(m.group(1))
         if rng:
             return f"=SUM({rng})"
 
     # --- AVERAGE ---
-    m = re.match(r"^(?:average|mean|avg)\s+(?:of\s+)?(.+)$", tl)
+    m = re.match(r"^(?:what'?s\s+)?(?:the\s+)?(?:average|mean|avg)\s+(?:of\s+|for\s+)?(.+)$", tl)
     if m:
         rng = _extract_range(m.group(1))
         if rng:
             return f"=AVERAGE({rng})"
 
     # --- COUNT (numeric cells) ---
-    m = re.match(r"^count\s+(?:numbers?\s+in\s+)?(.+)$", tl)
+    m = re.match(r"^count\s+(?:(?:numbers?|values?|entries?|items?)\s+in\s+)?(.+)$", tl)
     if m:
         rng = _extract_range(m.group(1))
         if rng:
             return f"=COUNT({rng})"
 
     # --- COUNTA (non-empty cells) ---
-    m = re.match(r"^count\s+(?:non[\s-]?empty|all(?:\s+cells)?\s+in)\s+(.+)$", tl)
+    m = re.match(r"^count\s+(?:non[\s-]?empty|non[\s-]?blank|all(?:\s+cells)?\s+in|filled)\s+(.+)$", tl)
     if m:
         rng = _extract_range(m.group(1))
         if rng:
             return f"=COUNTA({rng})"
 
     # Also "how many" → COUNT
-    m = re.match(r"^how many\s+(?:(?:numbers?|values?|cells?)\s+in\s+)?(.+)$", tl)
+    m = re.match(r"^how many\s+(?:(?:numbers?|values?|cells?|entries?|items?)\s+in\s+)?(.+)$", tl)
     if m:
         rng = _extract_range(m.group(1))
         if rng:
             return f"=COUNT({rng})"
 
     # --- MAX ---
-    m = re.match(r"^(?:max|maximum|highest|largest)\s+(?:of\s+)?(.+)$", tl)
+    m = re.match(r"^(?:what'?s\s+)?(?:the\s+)?(?:max|maximum|highest|largest|top)\s+(?:of\s+|value\s+in\s+|in\s+)?(.+)$", tl)
     if m:
         rng = _extract_range(m.group(1))
         if rng:
             return f"=MAX({rng})"
 
     # --- MIN ---
-    m = re.match(r"^(?:min|minimum|lowest|smallest)\s+(?:of\s+)?(.+)$", tl)
+    m = re.match(r"^(?:what'?s\s+)?(?:the\s+)?(?:min|minimum|lowest|smallest|bottom)\s+(?:of\s+|value\s+in\s+|in\s+)?(.+)$", tl)
     if m:
         rng = _extract_range(m.group(1))
         if rng:
             return f"=MIN({rng})"
 
     # --- IF ---
+    _IF_OPS = (
+        "greater than or equal to|greater than|more than|bigger than|above|over|"
+        "less than or equal to|less than|fewer than|smaller than|below|under|"
+        "equal to|equals|is equal to|"
+        "not equal to|doesn't equal|does not equal|not equals|"
+        "at least|no less than|"
+        "at most|no more than|"
+        r">=|<=|<>|>|<|="
+    )
+    _IF_OP_MAP = {
+        "greater than or equal to": ">=", "at least": ">=", "no less than": ">=",
+        "greater than": ">", "more than": ">", "bigger than": ">", "above": ">", "over": ">",
+        "less than or equal to": "<=", "at most": "<=", "no more than": "<=",
+        "less than": "<", "fewer than": "<", "smaller than": "<", "below": "<", "under": "<",
+        "equal to": "=", "equals": "=", "is equal to": "=",
+        "not equal to": "<>", "doesn't equal": "<>", "does not equal": "<>", "not equals": "<>",
+        ">=": ">=", "<=": "<=", "<>": "<>", ">": ">", "<": "<", "=": "=",
+    }
+    # "is" before operator is optional; "else" clause is optional (defaults to empty string)
     m = re.match(
-        r"^if\s+([A-Za-z]+\d+)\s+is\s+"
-        r"(greater than|less than|equal to|not equal to|>=|<=|>|<|=)\s+"
-        r"(.+?)\s+then\s+(.+?)\s+else\s+(.+)$",
+        rf"^if\s+([A-Za-z]+\d+)\s+(?:is\s+)?({_IF_OPS})\s+"
+        r"(.+?)\s+then\s+(.+?)(?:\s+else\s+(.+))?$",
         tl,
     )
     if m:
         cell = m.group(1).upper()
-        op_map = {
-            "greater than": ">", "less than": "<", "equal to": "=",
-            "not equal to": "<>", ">=": ">=", "<=": "<=",
-            ">": ">", "<": "<", "=": "=",
-        }
-        op = op_map.get(m.group(2), m.group(2))
+        op = _IF_OP_MAP.get(m.group(2), m.group(2))
         val = _fmt_val(m.group(3))
         then_val = _fmt_val(m.group(4))
-        else_val = _fmt_val(m.group(5))
+        else_val = _fmt_val(m.group(5)) if m.group(5) else '""'
         return f"=IF({cell}{op}{val},{then_val},{else_val})"
 
     # --- VLOOKUP ---

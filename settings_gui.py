@@ -61,7 +61,7 @@ class KodaSettings(tk.Tk):
         self._build_ui()
         self.protocol("WM_DELETE_WINDOW", self.on_close)
         self.update_idletasks()
-        self.geometry("620x540")
+        self.geometry("620x680")
 
     def _build_ui(self):
         notebook = ttk.Notebook(self)
@@ -112,16 +112,11 @@ class KodaSettings(tk.Tk):
         ttk.Label(parent, text="Features", style="Header.TLabel").pack(anchor="w", pady=(0, 4))
 
         checks = [
-            ("sound_effects",                   "sound_var",       "Sound effects",                        True,  None),
-            ("post_processing.remove_filler_words", "filler_var",  "Remove filler words  (um, uh, you know)", True, "post_processing"),
-            ("noise_reduction",                 "noise_var",       "Noise reduction  (for noisy environments)", False, None),
-            ("streaming",                       "stream_var",      "Streaming transcription  (live preview)",  True,  None),
-            ("post_processing.auto_format",     "autoformat_var",  "Auto-format  (numbers, dates, punctuation)", True, "post_processing"),
-            ("overlay_enabled",                 "overlay_var",     "Floating status overlay",              True,  None),
-            ("voice_commands",                  "voicecmds_var",   "Voice commands  (select all, undo, new line)", True, None),
-            ("profiles_enabled",                "profiles_var",    "Per-app profiles  (auto-switch by window)", True, None),
-            ("post_processing.code_vocabulary", "code_var",        "Code vocabulary  (command mode symbols)", False, "post_processing"),
-            ("formula_mode.enabled",            "formula_var",     "Formula mode  (Excel / Google Sheets)", False, "formula_mode"),
+            ("sound_effects",                       "sound_var",       "Sound effects",                              True,  None),
+            ("post_processing.remove_filler_words", "filler_var",      "Remove filler words  (um, uh, you know)",    True,  "post_processing"),
+            ("streaming",                           "stream_var",      "Streaming transcription  (live preview)",    True,  None),
+            ("post_processing.auto_format",         "autoformat_var",  "Auto-format  (numbers, dates, punctuation)", True,  "post_processing"),
+            ("voice_commands",                      "voicecmds_var",   "Voice commands  (select all, undo, new line)", True, None),
         ]
         for cfg_key, attr, label, default, section in checks:
             if section:
@@ -254,6 +249,26 @@ class KodaSettings(tk.Tk):
             ttk.Button(pbr, text=lbl, command=cmd).pack(side="left", padx=(0, 4))
 
     def _build_advanced_tab(self, parent):
+        ttk.Label(parent, text="Behavior", style="Header.TLabel").pack(anchor="w", pady=(0, 4))
+
+        behavior_checks = [
+            ("overlay_enabled",                 "overlay_var",   "Floating status overlay",                   False, None),
+            ("profiles_enabled",                "profiles_var",  "Per-app profiles  (auto-switch by window)", True,  None),
+            ("noise_reduction",                 "noise_var",     "Noise reduction  (for noisy environments)", False, None),
+            ("post_processing.code_vocabulary", "code_var",      "Code vocabulary  (command mode symbols)",   False, "post_processing"),
+        ]
+        for cfg_key, attr, label, default, section in behavior_checks:
+            if section:
+                sub_key = cfg_key.split(".")[1]
+                val = self.config_data.get(section, {}).get(sub_key, default)
+            else:
+                val = self.config_data.get(cfg_key, default)
+            var = tk.BooleanVar(value=val)
+            setattr(self, attr, var)
+            ttk.Checkbutton(parent, text=label, variable=var).pack(anchor="w", pady=1)
+
+        ttk.Separator(parent, orient="horizontal").pack(fill="x", pady=10)
+
         ttk.Label(parent, text="Translation", style="Header.TLabel").pack(anchor="w", pady=(0, 4))
         self.trans_var = tk.BooleanVar(value=self.config_data.get("translation", {}).get("enabled", False))
         ttk.Checkbutton(parent, text="Enable translation  (speak one language, output another)", variable=self.trans_var).pack(anchor="w")
@@ -343,9 +358,6 @@ class KodaSettings(tk.Tk):
         tts = cfg.setdefault("tts", {})
         tts["voice"] = self.voice_var.get()
         tts["rate"] = self.speed_var.get()
-
-        formula = cfg.setdefault("formula_mode", {})
-        formula["enabled"] = self.formula_var.get()
 
         cfg["snippets"] = self._snippets
         save_config(cfg)
