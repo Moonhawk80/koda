@@ -131,12 +131,13 @@ class KodaSettings(tk.Tk):
     def _build_hotkeys_tab(self, parent):
         FKEY_OPTIONS = ["f1","f2","f3","f4","f5","f6","f7","f8","f9","f10","f11","f12"]
         DICT_OPTIONS = ["ctrl+space", "ctrl+alt+d"] + FKEY_OPTIONS
+        PROMPT_OPTIONS = [f"ctrl+f{n}" for n in range(1, 13)] + FKEY_OPTIONS
 
         ttk.Label(parent, text="Hotkey Assignments", style="Header.TLabel").pack(anchor="w", pady=(0, 10))
 
         self.hk_dict_var    = tk.StringVar(value=self.config_data.get("hotkey_dictation",          "ctrl+space"))
         self.hk_cmd_var     = tk.StringVar(value=self.config_data.get("hotkey_command",             "f8"))
-        self.hk_prompt_var  = tk.StringVar(value=self.config_data.get("hotkey_prompt",              "f9"))
+        self.hk_prompt_var  = tk.StringVar(value=self.config_data.get("hotkey_prompt",              "ctrl+f9"))
         self.hk_corr_var    = tk.StringVar(value=self.config_data.get("hotkey_correction",          "f7"))
         self.hk_read_var    = tk.StringVar(value=self.config_data.get("hotkey_readback",            "f6"))
         self.hk_readsel_var = tk.StringVar(value=self.config_data.get("hotkey_readback_selected",   "f5"))
@@ -144,7 +145,7 @@ class KodaSettings(tk.Tk):
         rows = [
             ("Dictation:",     self.hk_dict_var,    DICT_OPTIONS),
             ("Command:",       self.hk_cmd_var,      FKEY_OPTIONS),
-            ("Prompt Assist:", self.hk_prompt_var,   FKEY_OPTIONS),
+            ("Prompt Assist:", self.hk_prompt_var,   PROMPT_OPTIONS),
             ("Correction:",    self.hk_corr_var,     FKEY_OPTIONS),
             ("Read back:",     self.hk_read_var,     FKEY_OPTIONS),
             ("Read selected:", self.hk_readsel_var,  FKEY_OPTIONS),

@@ -30,6 +30,7 @@ DEFAULT_CONFIG = {
     "output_mode": "auto_paste",
     "hotkey_dictation": "ctrl+space",
     "hotkey_command": "ctrl+shift+.",
+    "hotkey_prompt": "ctrl+f9",
     "hotkey_correction": "ctrl+shift+z",
     "hotkey_readback": "ctrl+alt+r",
     "hotkey_readback_selected": "ctrl+alt+t",

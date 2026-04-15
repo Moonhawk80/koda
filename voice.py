@@ -999,7 +999,7 @@ def _build_hotkey_config():
     return {
         "hotkey_dictation": config.get("hotkey_dictation", "ctrl+space"),
         "hotkey_command": config.get("hotkey_command", "f8"),
-        "hotkey_prompt": config.get("hotkey_prompt", "f9"),
+        "hotkey_prompt": config.get("hotkey_prompt", "ctrl+f9"),
         "hotkey_correction": config.get("hotkey_correction", "f7"),
         "hotkey_readback": config.get("hotkey_readback", "f6"),
         "hotkey_readback_selected": config.get("hotkey_readback_selected", "f5"),
@@ -1743,7 +1743,7 @@ def run_setup():
                 f.write(VERSION)
             hk_dict = config.get("hotkey_dictation", "ctrl+space").upper()
             hk_cmd = config.get("hotkey_command", "f8").upper()
-            hk_prompt = config.get("hotkey_prompt", "f9").upper()
+            hk_prompt = config.get("hotkey_prompt", "ctrl+f9").upper()
             welcome_msg = (
                 f"Welcome to Koda!\n"
                 f"{hk_dict} = Dictation (hold to talk)\n"
