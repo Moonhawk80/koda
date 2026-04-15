@@ -370,11 +370,32 @@ class TestVoiceCommands(unittest.TestCase):
         mock_keyboard.send.assert_called_with("enter")
 
     @patch("voice_commands.keyboard")
-    def test_command_with_text(self, mock_keyboard):
-        """Command at start of text — command extracted, text preserved."""
-        text, cmds = extract_and_execute_commands("new line hello world")
+    def test_command_suffix(self, mock_keyboard):
+        """Command at END of text — command executed, preceding text preserved."""
+        text, cmds = extract_and_execute_commands("hello world new line")
         self.assertEqual(text, "hello world")
         self.assertEqual(len(cmds), 1)
+
+    @patch("voice_commands.keyboard")
+    def test_command_prefix_no_longer_fires(self, mock_keyboard):
+        """Command at START of text does NOT fire — prefix matching removed to prevent
+        false positives when command words appear naturally at start of sentences."""
+        text, cmds = extract_and_execute_commands("new line hello world")
+        self.assertEqual(text, "new line hello world")  # text preserved, no command fired
+        self.assertEqual(len(cmds), 0)
+
+    @patch("voice_commands.keyboard")
+    def test_select_all_in_sentence_not_stripped(self, mock_keyboard):
+        """'select all' in a sentence should NOT fire the command."""
+        text, cmds = extract_and_execute_commands("I need to select all the files")
+        self.assertEqual(len(cmds), 0)
+
+    @patch("voice_commands.keyboard")
+    def test_undo_at_sentence_end_not_stripped(self, mock_keyboard):
+        """'undo' at end of a sentence should NOT fire the command."""
+        text, cmds = extract_and_execute_commands("I said undo")
+        self.assertEqual(text, "I said undo")
+        self.assertEqual(len(cmds), 0)
 
     @patch("voice_commands.keyboard")
     def test_no_command(self, mock_keyboard):
@@ -396,24 +417,31 @@ class TestVoiceCommands(unittest.TestCase):
         self.assertEqual(len(cmds), 1)
 
     @patch("voice_commands.keyboard")
-    def test_terminal_select_all_clears_line(self, mock_keyboard):
-        """In terminal, 'select all' clears the command line instead of Ctrl+A."""
+    def test_terminal_select_all_falls_back_to_ctrl_a(self, mock_keyboard):
+        """In terminal, 'select all' has no override — falls back to GUI Ctrl+A.
+        No reliable keystroke selects just the current PSReadLine input line visually."""
         text, cmds = extract_and_execute_commands("select all", in_terminal=True)
         self.assertEqual(text, "")
         self.assertEqual(len(cmds), 1)
-        # Should use readline clear-line (Ctrl+E then Ctrl+U), not Ctrl+A
-        calls = [c.args[0] for c in mock_keyboard.send.call_args_list]
-        self.assertIn("ctrl+e", calls)
-        self.assertIn("ctrl+u", calls)
-        self.assertNotIn("ctrl+a", calls)
+        mock_keyboard.send.assert_called_with("ctrl+a")
 
     @patch("voice_commands.keyboard")
-    def test_terminal_delete_kills_to_eol(self, mock_keyboard):
-        """In terminal, 'delete' kills to end of line (Ctrl+K) instead of Forward Delete."""
+    def test_terminal_delete_kills_to_bol(self, mock_keyboard):
+        """In terminal, 'delete' uses Ctrl+U (kill to BOL) — cursor is at EOL after paste,
+        so Ctrl+K (kill to EOL) kills nothing; Ctrl+U clears the pasted text."""
         text, cmds = extract_and_execute_commands("delete", in_terminal=True)
         self.assertEqual(text, "")
         self.assertEqual(len(cmds), 1)
-        mock_keyboard.send.assert_called_with("ctrl+k")
+        mock_keyboard.send.assert_called_with("ctrl+u")
+
+    @patch("voice_commands.keyboard")
+    def test_terminal_undo_clears_line(self, mock_keyboard):
+        """In terminal, 'undo' uses Ctrl+U (kill to BOL) — Ctrl+Z doesn't undo synthetic
+        clipboard pastes in PSReadLine, so clearing to BOL is the reliable alternative."""
+        text, cmds = extract_and_execute_commands("undo", in_terminal=True)
+        self.assertEqual(text, "")
+        self.assertEqual(len(cmds), 1)
+        mock_keyboard.send.assert_called_with("ctrl+u")
 
     @patch("voice_commands.keyboard")
     def test_terminal_delete_word_uses_ctrl_w(self, mock_keyboard):
@@ -422,6 +450,27 @@ class TestVoiceCommands(unittest.TestCase):
         self.assertEqual(text, "")
         self.assertEqual(len(cmds), 1)
         mock_keyboard.send.assert_called_with("ctrl+w")
+
+    @patch("voice_commands.keyboard")
+    def test_delete_word_in_sentence_not_stripped(self, mock_keyboard):
+        """'delete' embedded in a sentence should NOT be treated as a voice command."""
+        text, cmds = extract_and_execute_commands("we are testing the word delete")
+        self.assertEqual(text, "we are testing the word delete")
+        self.assertEqual(len(cmds), 0)
+
+    @patch("voice_commands.keyboard")
+    def test_delete_at_sentence_end_not_stripped(self, mock_keyboard):
+        """'delete' at the end of a sentence should NOT fire as a suffix command."""
+        text, cmds = extract_and_execute_commands("I want to delete")
+        self.assertEqual(text, "I want to delete")
+        self.assertEqual(len(cmds), 0)
+
+    @patch("voice_commands.keyboard")
+    def test_delete_alone_still_works(self, mock_keyboard):
+        """Bare 'delete' as the entire utterance still fires the delete command."""
+        text, cmds = extract_and_execute_commands("delete")
+        self.assertEqual(text, "")
+        self.assertEqual(len(cmds), 1)
 
     @patch("voice_commands.keyboard")
     def test_gui_select_all_unchanged(self, mock_keyboard):

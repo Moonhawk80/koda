@@ -17,7 +17,23 @@ Examples:
 
 import re
 import time
+import logging
+import ctypes
+import ctypes.wintypes
 import keyboard
+
+logger = logging.getLogger("koda")
+
+
+def _focused_window():
+    """Return (hwnd, title) of the currently focused window for debug logging."""
+    try:
+        hwnd = ctypes.windll.user32.GetForegroundWindow()
+        buf = ctypes.create_unicode_buffer(256)
+        ctypes.windll.user32.GetWindowTextW(hwnd, buf, 256)
+        return hwnd, buf.value
+    except Exception:
+        return 0, "unknown"
 
 
 # --- Command definitions ---
@@ -70,6 +86,13 @@ def _action_delete_line():
 # "delete" → Forward-Delete does nothing in terminal without a selection. Ctrl+K
 # kills from cursor to end of line, which is the most useful equivalent.
 
+def _action_terminal_select_all():
+    """Select all text in the terminal viewport (Windows Terminal Ctrl+Shift+A).
+    Ctrl+A + Shift+End fires in PSReadLine but produces no visible highlight.
+    Ctrl+Shift+A is Windows Terminal's native select-all and creates a real visual selection.
+    """
+    keyboard.send("ctrl+shift+a")
+
 def _action_terminal_clear_line():
     """Clear entire command line: go to EOL then kill to BOL."""
     keyboard.send("ctrl+e")
@@ -79,6 +102,13 @@ def _action_terminal_kill_end():
     """Kill from cursor to end of line (readline Ctrl+K)."""
     keyboard.send("ctrl+k")
 
+def _action_terminal_kill_bol():
+    """Kill from cursor to beginning of line (readline Ctrl+U).
+    After Koda pastes, cursor is at EOL — Ctrl+U clears the whole pasted text.
+    Used for both 'delete' and 'undo' in terminal mode.
+    """
+    keyboard.send("ctrl+u")
+
 def _action_terminal_delete_word():
     """Delete word before cursor (readline Ctrl+W)."""
     keyboard.send("ctrl+w")
@@ -87,11 +117,14 @@ def _action_terminal_delete_word():
 # Maps command description → terminal override action.
 # Only commands that behave differently in a terminal need an entry here.
 TERMINAL_OVERRIDES = {
-    "Select all text":            _action_terminal_clear_line,
-    "Delete selection/last text": _action_terminal_kill_end,
-    "Delete forward":             _action_terminal_kill_end,
+    # "Select all text" removed — no reliable keystroke selects just the current
+    # input line in PSReadLine: Ctrl+A+Shift+End produces no visual highlight,
+    # Ctrl+Shift+A selects the entire viewport. Fall back to GUI default (Ctrl+A).
+    "Delete selection/last text": _action_terminal_kill_bol,   # Ctrl+U: cursor at EOL after paste, kill to BOL
+    "Delete forward":             _action_terminal_kill_bol,   # Ctrl+U: same reason — Ctrl+K (EOL) kills nothing
     "Delete current line":        _action_terminal_clear_line,
     "Delete previous word":       _action_terminal_delete_word,
+    "Undo":                       _action_terminal_kill_bol,   # Ctrl+U: Ctrl+Z doesn't undo synthetic paste in PSReadLine
 }
 
 def _action_enter():
@@ -200,6 +233,22 @@ VOICE_COMMANDS = [
     (r"(?:press )?escape", _action_escape, "Escape"),
 ]
 
+# Commands that only trigger when the ENTIRE utterance is the command.
+# Excluded from suffix matching to prevent false positives when these words
+# appear naturally at the end of a dictated sentence.
+# (Prefix matching is disabled entirely — see extract_and_execute_commands.)
+_WHOLE_UTTERANCE_ONLY = {
+    "Delete forward",    # "I need to delete" should not fire forward-delete
+    "Select all text",   # "I need to select all" should not fire Ctrl+A
+    "Undo",              # "I said undo" should not fire Ctrl+Z
+    "Redo",              # "I said redo" should not fire Ctrl+Y
+    "Copy",              # "I need to copy" should not fire Ctrl+C
+    "Cut",               # "I want to cut" should not fire Ctrl+X
+    "Paste",             # "I need to paste" should not fire Ctrl+V
+    "Save",              # "I want to save" should not fire Ctrl+S
+    "Find",              # "I need to find" should not fire Ctrl+F
+}
+
 # Compile patterns
 _COMPILED_COMMANDS = [
     (re.compile(r"^\s*" + pattern + r"\s*[.!?]?\s*$", re.IGNORECASE), action, desc)
@@ -210,10 +259,12 @@ _COMPILED_COMMANDS = [
 _PREFIX_COMMANDS = [
     (re.compile(r"^\s*" + pattern + r"[\s,.!?]+", re.IGNORECASE), action, desc)
     for pattern, action, desc in VOICE_COMMANDS
+    if desc not in _WHOLE_UTTERANCE_ONLY
 ]
 _SUFFIX_COMMANDS = [
     (re.compile(r"[\s,.!?]+" + pattern + r"\s*[.!?]?\s*$", re.IGNORECASE), action, desc)
     for pattern, action, desc in VOICE_COMMANDS
+    if desc not in _WHOLE_UTTERANCE_ONLY
 ]
 
 
@@ -251,10 +302,22 @@ def extract_and_execute_commands(text, in_terminal=False):
         return text, []
 
     def _run(action, desc):
+        hwnd, title = _focused_window()
         if in_terminal and desc in TERMINAL_OVERRIDES:
-            TERMINAL_OVERRIDES[desc]()
+            fn = TERMINAL_OVERRIDES[desc]
+            logger.debug("Voice cmd [terminal]: %r -> %s | focus: hwnd=%s %r", desc, fn.__name__, hwnd, title)
+            try:
+                fn()
+                logger.debug("Voice cmd [terminal]: %r done", desc)
+            except Exception as e:
+                logger.error("Voice cmd [terminal] error for %r: %s", desc, e)
         else:
-            action()
+            logger.debug("Voice cmd: %r -> %s | focus: hwnd=%s %r", desc, action.__name__, hwnd, title)
+            try:
+                action()
+                logger.debug("Voice cmd: %r done", desc)
+            except Exception as e:
+                logger.error("Voice cmd error for %r: %s", desc, e)
 
     executed = []
     original = text.strip()
@@ -267,16 +330,12 @@ def extract_and_execute_commands(text, in_terminal=False):
             executed.append(desc)
             return "", executed
 
-    # Check for command at the START of text
-    for pattern, action, desc in _PREFIX_COMMANDS:
-        match = pattern.match(text)
-        if match:
-            _run(action, desc)
-            executed.append(desc)
-            text = text[match.end():].strip()
-            break
-
-    # Check for command at the END of text
+    # Check for command at the END of text only.
+    # Prefix matching (command at start) was removed — it caused too many false
+    # positives when command words appeared naturally at the start of a sentence
+    # (e.g. "select all the files" firing Ctrl+A and dropping "the files").
+    # Users can say command words alone as a standalone utterance, or append them
+    # at the end of dictation ("write this text new line").
     for pattern, action, desc in _SUFFIX_COMMANDS:
         match = pattern.search(text)
         if match:
