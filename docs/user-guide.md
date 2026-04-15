@@ -46,10 +46,11 @@ Your words appear in whatever app or field was active when you pressed the hotke
 
 | Hotkey | What it does |
 |--------|-------------|
-| **Ctrl + Space** | Hold to dictate, release to paste |
-| **Ctrl + F9** | Prompt Assist — speak an idea, get a structured prompt ready to paste into ChatGPT or Claude. In Excel or Google Sheets, activates Formula Mode instead (see below) |
-| **F7** | Correction — re-transcribes your last recording if it came out wrong |
+| **Ctrl + Space** | Hold to dictate, release to paste. In a terminal, spoken symbols are converted automatically (see Terminal Mode below) |
+| **Ctrl + F9** | In Excel or Google Sheets — Formula Mode (speak a formula or navigate). Everywhere else — Prompt Assist (speak an idea, get a structured prompt for ChatGPT or Claude) |
+| **F7** | Correction — undoes your last paste and starts a new recording so you can try again |
 | **F6** | Read back — Koda reads your last transcription aloud |
+| **F8** | Voice command mode — speak editing commands like "select all", "undo", "bold" |
 
 ---
 
@@ -168,9 +169,111 @@ Words like *more than, bigger than, above, over* all mean `>`. Words like *at le
 - **Regular dictation still works** — if Koda doesn't recognize a formula pattern, it pastes your words as normal text, so nothing is lost
 - **Ctrl + Space in Excel = plain dictation** — use this when you want to type notes or text, not formulas
 
+### Excel navigation by voice
+
+You can also navigate your spreadsheet with Ctrl + F9:
+
+| What you say | What happens |
+|---|---|
+| go to B5 | Selects cell B5 |
+| go to column C | Selects entire column C |
+| go to row 5 | Selects entire row 5 |
+| go home | Jumps to cell A1 |
+| go to last row | Jumps to the last row with data |
+| select all | Selects entire used range |
+
+### Create tables by voice
+
+| What you say | What happens |
+|---|---|
+| make a table | Converts your current selection into an Excel Table with auto-filter |
+| create a table with columns Name Date Amount Status | Writes those headers at the active cell and creates the table |
+
 ### For complex formulas
 
 If you need nested formulas or advanced logic, install [Ollama](https://ollama.com) (free, runs locally) and enable **LLM Polish** in Settings → Advanced. Run `ollama pull phi3:mini` once to set it up. Koda will use the AI model to handle anything its built-in parser can't.
+
+---
+
+## Terminal Mode (Command Line)
+
+When you use **Ctrl + Space** inside a terminal (Windows Terminal, PowerShell, Command Prompt, Git Bash, WSL), Koda automatically converts spoken symbols into shell syntax. No setup needed — it activates whenever a terminal is the active window.
+
+### How to use it
+
+Hold **Ctrl + Space**, speak your command naturally using words for symbols, then release.
+
+### What you can say
+
+| What you say | What Koda types |
+|---|---|
+| cd slash users slash alex slash projects | `cd /users/alex/projects` |
+| tilde slash projects slash koda | `~/projects/koda` |
+| git dash dash version | `git --version` |
+| npm install dash dash save dev | `npm install --save dev` |
+| ls dash l | `ls -l` |
+| dot dot slash src | `../src` |
+| cat file dot txt pipe grep error | `cat file.txt \| grep error` |
+| echo hello greater than output dot txt | `echo hello > output.txt` |
+| cd slash tmp and and ls | `cd /tmp && ls` |
+
+### Symbol reference
+
+| Say | Gets |
+|---|---|
+| slash / forward slash | `/` |
+| backslash / back slash | `\` |
+| tilde | `~` |
+| dash dash / double dash | `--` |
+| dash + letter (e.g. "dash v") | `-v` |
+| pipe | `\|` |
+| greater than | `>` |
+| double greater than | `>>` |
+| and and / double ampersand | `&&` |
+| star / asterisk | `*` |
+| dollar / dollar sign | `$` |
+| dot + extension (e.g. "dot txt") | `.txt` |
+| dot dot | `..` |
+| dot slash | `./` |
+| dot dot slash | `../` |
+
+**Auto-capitalize is disabled in terminal mode** — "cd /users" stays lowercase, not "Cd /users".
+
+---
+
+## Undoing a Paste
+
+If Koda pastes something wrong, you have three options:
+
+| How | What it does |
+|---|---|
+| Press **F7** | Undoes the last paste and starts a new recording so you can try again |
+| Hold **Ctrl + Space**, say **"undo"** | Sends Ctrl+Z — just undoes, no re-recording |
+| Hold **Ctrl + Space**, say **"delete that"** | Backspaces over the last paste |
+
+---
+
+## Voice Editing Commands
+
+While holding **Ctrl + Space** (or F8 for command mode), speak these commands to control your editor without typing:
+
+| Say | Action |
+|---|---|
+| undo | Ctrl+Z |
+| redo | Ctrl+Y |
+| select all | Ctrl+A |
+| copy | Ctrl+C |
+| cut | Ctrl+X |
+| paste | Ctrl+V |
+| save | Ctrl+S |
+| delete that | Backspace |
+| delete the word | Ctrl+Backspace |
+| new line | Enter |
+| new paragraph | Enter + Enter |
+| bold | Ctrl+B |
+| italic | Ctrl+I |
+| go to the end | Ctrl+End |
+| go home | Ctrl+Home |
 
 ---
 
