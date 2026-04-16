@@ -94,20 +94,22 @@ def _action_terminal_select_all():
     keyboard.send("ctrl+shift+a")
 
 def _action_terminal_clear_line():
-    """Clear entire command line: go to EOL then kill to BOL."""
-    keyboard.send("ctrl+e")
-    keyboard.send("ctrl+u")
+    """Clear entire command line via PSReadLine RevertLine (Escape).
+    Works in Windows mode (default) and Vi mode. Clears current input back to empty.
+    """
+    keyboard.send("escape")
 
 def _action_terminal_kill_end():
     """Kill from cursor to end of line (readline Ctrl+K)."""
     keyboard.send("ctrl+k")
 
 def _action_terminal_kill_bol():
-    """Kill from cursor to beginning of line (readline Ctrl+U).
-    After Koda pastes, cursor is at EOL — Ctrl+U clears the whole pasted text.
+    """Clear the current input line via PSReadLine RevertLine (Escape).
+    Escape = RevertLine in PSReadLine Windows mode (the default).
+    Ctrl+U only works in Emacs mode — not reliable cross-machine.
     Used for both 'delete' and 'undo' in terminal mode.
     """
-    keyboard.send("ctrl+u")
+    keyboard.send("escape")
 
 def _action_terminal_delete_word():
     """Delete word before cursor (readline Ctrl+W)."""
@@ -299,7 +301,7 @@ def extract_and_execute_commands(text, in_terminal=False):
         entire transcription was a command.
     """
     if not text:
-        return text, []
+        return text, [], None
 
     def _run(action, desc):
         hwnd, title = _focused_window()
@@ -328,7 +330,7 @@ def extract_and_execute_commands(text, in_terminal=False):
             time.sleep(0.1)  # Small delay for focus
             _run(action, desc)
             executed.append(desc)
-            return "", executed
+            return "", executed, None
 
     # Check for command at the END of text only.
     # Prefix matching (command at start) was removed — it caused too many false
@@ -339,12 +341,15 @@ def extract_and_execute_commands(text, in_terminal=False):
     for pattern, action, desc in _SUFFIX_COMMANDS:
         match = pattern.search(text)
         if match:
-            _run(action, desc)
-            executed.append(desc)
             text = text[:match.start()].strip()
-            break
+            executed.append(desc)
+            # Return as deferred — caller must paste text FIRST, then fire this.
+            # Firing here would send Enter before the text is pasted.
+            def _deferred(a=action, d=desc):
+                _run(a, d)
+            return text, executed, _deferred
 
-    return text, executed
+    return text, executed, None
 
 
 def get_command_list():

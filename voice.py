@@ -750,8 +750,9 @@ def _transcribe_and_paste():
             duration = time.time() - rec_start
 
             # Check for voice editing commands (e.g. "select all", "undo")
+            deferred_cmd = None
             if config.get("voice_commands", True):
-                processed, cmds = extract_and_execute_commands(processed, in_terminal=_in_terminal)
+                processed, cmds, deferred_cmd = extract_and_execute_commands(processed, in_terminal=_in_terminal)
                 if cmds and not processed:
                     # Entire utterance was a command — no text to paste
                     play_success_sound()
@@ -776,6 +777,9 @@ def _transcribe_and_paste():
                 # Use keyboard.send instead of pyautogui — pyautogui's
                 # synthetic Ctrl conflicts with the keyboard library's hooks
                 keyboard.send("ctrl+v")
+                if deferred_cmd:
+                    time.sleep(0.05)  # let paste settle before suffix command
+                    deferred_cmd()
                 play_success_sound()
 
             # Save to history and stats
