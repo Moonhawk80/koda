@@ -358,18 +358,19 @@
       <div class="tip"><strong>Auto-capitalize is off in terminal mode</strong> — "cd /users" stays lowercase, not "Cd /users".</div>
 
       <h3>Voice commands in a terminal</h3>
-      <p>Editing commands are automatically adapted for the terminal — Koda uses readline shortcuts instead of GUI shortcuts:</p>
+      <p>Editing commands are automatically adapted for the terminal — Koda uses the right shortcuts for PowerShell / PSReadLine:</p>
       <table class="mic-table">
         <tr>
           <th>Say</th>
           <th>What happens in terminal</th>
         </tr>
-        <tr><td>select all</td><td>Clears the whole command line (<kbd>Ctrl+E</kbd> + <kbd>Ctrl+U</kbd>)</td></tr>
-        <tr><td>delete / delete that</td><td>Kills to end of line (<kbd>Ctrl+K</kbd>)</td></tr>
+        <tr><td>undo</td><td>Clears the current input line (<kbd>Escape</kbd> = RevertLine) — PSReadLine doesn't undo synthetic pastes via Ctrl+Z</td></tr>
+        <tr><td>delete / delete that</td><td>Clears the current input line (<kbd>Escape</kbd> = RevertLine)</td></tr>
         <tr><td>delete the word</td><td>Deletes word before cursor (<kbd>Ctrl+W</kbd>)</td></tr>
-        <tr><td>delete line</td><td>Clears the whole command line</td></tr>
+        <tr><td>select all</td><td>Moves cursor to start of line (<kbd>Ctrl+A</kbd>)</td></tr>
         <tr><td>new line</td><td>Enter — runs the command</td></tr>
       </table>
+      <p><strong>Tip:</strong> Append a command at the end of your dictation — Koda pastes the text first, then fires the command. Example: say <em>"hello world new line"</em> to paste <code>Hello world</code> and hit Enter.</p>
 
       <h2>Excel Voice Navigation</h2>
       <p>In Excel or Google Sheets, hold <kbd>Ctrl + F9</kbd> and speak to navigate and manage your spreadsheet by voice:</p>

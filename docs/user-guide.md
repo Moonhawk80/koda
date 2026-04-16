@@ -284,11 +284,13 @@ Terminal shortcuts are different from text editor shortcuts — Koda automatical
 
 | Say | Terminal action | Why it's different |
 |---|---|---|
-| select all | Clears the whole command line | `Ctrl+A` in a terminal moves to start of line, not select |
-| delete / delete that | `Ctrl+K` — kills to end of line | Forward Delete does nothing without a selection |
+| undo | Clears the current input line | PSReadLine doesn't undo synthetic pastes via Ctrl+Z — Escape (RevertLine) clears what was just pasted |
+| delete / delete that | Clears the current input line | Same as undo — Escape reverts the line |
 | delete the word | `Ctrl+W` — readline word delete | `Ctrl+Backspace` is less reliable in terminals |
-| delete line | Clears the whole command line | Same as select all |
+| select all | `Ctrl+A` — moves cursor to start of line | No reliable keystroke selects just the current input line with a visual highlight |
 | new line | Enter (runs the command) | Same as GUI |
+
+**Suffix commands in terminal:** You can append a command at the end of your dictation. Koda pastes your text first, then fires the command — so "hello world new line" pastes `Hello world` and then hits Enter.
 
 ---
 
