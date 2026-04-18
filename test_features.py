@@ -5,6 +5,7 @@ Covers: text processing (auto-formatting, emails, numbers, dates, punctuation),
 voice commands, profile matching, usage stats, and formula mode.
 """
 
+import glob
 import json
 import os
 import sqlite3
@@ -1349,6 +1350,100 @@ class TestFillerWordsManager(unittest.TestCase):
         # Stutter removal still runs, but no filler removal — text nearly unchanged
         self.assertIn("um", result)
         self.assertIn("basically", result)
+
+
+# ============================================================
+# HP1 Backup-Rename on Corruption — commit b4d4bae
+# (forge-clean Track 6 H1 + H2)
+# ============================================================
+
+class TestHp1BackupRenameOnCorruption(unittest.TestCase):
+    """Proves commit b4d4bae — HP1 silent-default-on-corruption fix on user vocab files.
+
+    Pre-fix: a corrupt custom_words.json / filler_words.json returned hardcoded
+    defaults and the original corrupt file was left in place. On the next Save,
+    the in-memory defaults got written back, permanently destroying the user's
+    tuned vocabulary/fillers.
+
+    Post-fix (mirror of profiles.load_profiles): the corrupt file is renamed to
+    <name>.corrupt.<ts> BEFORE defaults are returned, so a subsequent Save does
+    not destroy recoverable data.
+    """
+
+    def _cleanup(self, tmp_path):
+        for leftover in glob.glob(f"{tmp_path}*"):
+            try:
+                os.unlink(leftover)
+            except OSError:
+                pass
+
+    # ---- H2: text_processing.load_filler_words ----
+
+    def test_filler_words_corrupt_json_is_backed_up(self):
+        """H2: invalid-JSON filler_words.json is renamed to .corrupt.<ts> before defaults return."""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            f.write("not valid json {{{{")
+            tmp_path = f.name
+        try:
+            with patch("text_processing.FILLER_WORDS_PATH", tmp_path):
+                words = load_filler_words()
+            self.assertEqual(words, list(DEFAULT_FILLER_WORDS))
+            self.assertFalse(
+                os.path.exists(tmp_path),
+                "Corrupt filler_words.json must be renamed, not left in place",
+            )
+            backups = glob.glob(f"{tmp_path}.corrupt.*")
+            self.assertEqual(len(backups), 1, f"Expected one .corrupt.<ts> backup, got {backups}")
+            with open(backups[0]) as f:
+                self.assertEqual(f.read(), "not valid json {{{{")
+        finally:
+            self._cleanup(tmp_path)
+
+    def test_filler_words_wrong_shape_is_backed_up(self):
+        """H2 shape-error branch: non-list JSON (e.g., accidentally a dict) is also backed up."""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            json.dump({"accidentally": "a dict"}, f)
+            tmp_path = f.name
+        try:
+            with patch("text_processing.FILLER_WORDS_PATH", tmp_path):
+                words = load_filler_words()
+            self.assertEqual(words, list(DEFAULT_FILLER_WORDS))
+            self.assertFalse(os.path.exists(tmp_path))
+            backups = glob.glob(f"{tmp_path}.corrupt.*")
+            self.assertEqual(len(backups), 1)
+        finally:
+            self._cleanup(tmp_path)
+
+    # ---- H1: settings_gui.KodaSettings._load_custom_words_data ----
+
+    def test_custom_words_corrupt_json_is_backed_up(self):
+        """H1: invalid-JSON custom_words.json is renamed to .corrupt.<ts> before defaults return.
+
+        Calls the method unbound with a SimpleNamespace in place of `self` —
+        the method doesn't touch self, only module-level CUSTOM_WORDS_PATH and
+        DEFAULT_CUSTOM_WORDS. Avoids instantiating tk.Tk (would need a display).
+        """
+        from types import SimpleNamespace
+        from settings_gui import KodaSettings
+        from config import DEFAULT_CUSTOM_WORDS
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            f.write("not valid json {{{{")
+            tmp_path = f.name
+        try:
+            with patch("settings_gui.CUSTOM_WORDS_PATH", tmp_path):
+                data = KodaSettings._load_custom_words_data(SimpleNamespace())
+            self.assertEqual(data, dict(DEFAULT_CUSTOM_WORDS))
+            self.assertFalse(
+                os.path.exists(tmp_path),
+                "Corrupt custom_words.json must be renamed, not left in place",
+            )
+            backups = glob.glob(f"{tmp_path}.corrupt.*")
+            self.assertEqual(len(backups), 1, f"Expected one .corrupt.<ts> backup, got {backups}")
+            with open(backups[0]) as f:
+                self.assertEqual(f.read(), "not valid json {{{{")
+        finally:
+            self._cleanup(tmp_path)
 
 
 class TestHotkeyParser(unittest.TestCase):
