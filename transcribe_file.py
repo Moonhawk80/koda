@@ -13,18 +13,40 @@ import time
 
 
 class TranscribeFileWindow:
-    """Window for drag-and-drop / file-pick audio transcription."""
+    """Window for drag-and-drop / file-pick audio transcription.
 
-    def __init__(self, model, config):
+    Two modes:
+    - Full (default): user picks a file, sets language + timestamps, clicks
+      Transcribe. Copy / save / close.
+    - Minimal (`minimal=True`): file is supplied via `preload_filepath`;
+      transcription auto-starts on open. Language and timestamps come from
+      config. No browse, no options, no save button — just status + results +
+      copy + close. Used by the right-click context menu.
+    """
+
+    def __init__(self, model, config, preload_filepath=None, minimal=False):
         self._model = model
         self._config = config
+        self._preload_filepath = preload_filepath
+        self._minimal = minimal
         self._root = None
         self._thread = None
 
-    def show(self):
-        """Open the transcription window in its own thread."""
-        self._thread = threading.Thread(target=self._run, daemon=True)
-        self._thread.start()
+    def show(self, blocking=False):
+        """Open the transcription window.
+
+        Non-blocking (default): spawns a daemon thread running mainloop.
+        Suited to tray-launched invocation where the caller must not block.
+
+        Blocking: runs mainloop on the caller's thread. Used by
+        context_menu.transcribe() which IS the whole program and runs
+        mainloop synchronously.
+        """
+        if blocking:
+            self._run()
+        else:
+            self._thread = threading.Thread(target=self._run, daemon=True)
+            self._thread.start()
 
     def _run(self):
         self._root = tk.Tk()
@@ -34,7 +56,8 @@ class TranscribeFileWindow:
 
         root.title("Koda — Transcribe Audio File")
         root.geometry("650x500")
-        root.attributes("-topmost", True)
+        if not self._minimal:
+            root.attributes("-topmost", True)
 
         apply_dark_theme(root)
 
@@ -43,56 +66,66 @@ class TranscribeFileWindow:
 
         ttk.Label(main, text="Transcribe Audio File", style="Header.TLabel").pack(anchor="w", pady=(0, 10))
 
-        # File selection
-        file_frame = ttk.Frame(main)
-        file_frame.pack(fill="x", pady=(0, 10))
+        if self._minimal:
+            # Preloaded file display + status. No picker, no options, no button.
+            ttk.Label(main, text=f"File: {os.path.basename(self._preload_filepath)}").pack(anchor="w", pady=(0, 5))
+            ttk.Label(main, text=f"Path: {self._preload_filepath}", wraplength=600).pack(anchor="w", pady=(0, 10))
+            self._status_label = ttk.Label(main, text="Transcribing... please wait.")
+            self._status_label.pack(anchor="w", pady=(0, 10))
+        else:
+            # File selection
+            file_frame = ttk.Frame(main)
+            file_frame.pack(fill="x", pady=(0, 10))
 
-        self._file_var = tk.StringVar()
-        file_entry = ttk.Entry(file_frame, textvariable=self._file_var, width=55)
-        file_entry.pack(side="left", fill="x", expand=True, padx=(0, 10))
+            self._file_var = tk.StringVar()
+            file_entry = ttk.Entry(file_frame, textvariable=self._file_var, width=55)
+            file_entry.pack(side="left", fill="x", expand=True, padx=(0, 10))
 
-        ttk.Button(file_frame, text="Browse...", command=self._browse).pack(side="left")
+            ttk.Button(file_frame, text="Browse...", command=self._browse).pack(side="left")
 
-        # Options row
-        opt_frame = ttk.Frame(main)
-        opt_frame.pack(fill="x", pady=(0, 10))
+            # Options row
+            opt_frame = ttk.Frame(main)
+            opt_frame.pack(fill="x", pady=(0, 10))
 
-        ttk.Label(opt_frame, text="Language:").pack(side="left", padx=(0, 5))
-        self._lang_var = tk.StringVar(value=self._config.get("language", "en"))
-        lang_combo = ttk.Combobox(opt_frame, textvariable=self._lang_var, width=8,
-                                  values=["auto", "en", "es", "fr", "de", "pt", "zh", "ja", "ko",
-                                          "ar", "hi", "ru", "it", "nl", "pl", "tr"],
-                                  state="readonly")
-        lang_combo.pack(side="left", padx=(0, 15))
+            ttk.Label(opt_frame, text="Language:").pack(side="left", padx=(0, 5))
+            self._lang_var = tk.StringVar(value=self._config.get("language", "en"))
+            lang_combo = ttk.Combobox(opt_frame, textvariable=self._lang_var, width=8,
+                                      values=["auto", "en", "es", "fr", "de", "pt", "zh", "ja", "ko",
+                                              "ar", "hi", "ru", "it", "nl", "pl", "tr"],
+                                      state="readonly")
+            lang_combo.pack(side="left", padx=(0, 15))
 
-        self._timestamps_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(opt_frame, text="Include timestamps", variable=self._timestamps_var).pack(side="left")
+            self._timestamps_var = tk.BooleanVar(value=False)
+            ttk.Checkbutton(opt_frame, text="Include timestamps", variable=self._timestamps_var).pack(side="left")
 
-        # Transcribe button
-        btn_frame = ttk.Frame(main)
-        btn_frame.pack(fill="x", pady=(0, 10))
+            # Transcribe button
+            btn_frame = ttk.Frame(main)
+            btn_frame.pack(fill="x", pady=(0, 10))
 
-        self._transcribe_btn = ttk.Button(btn_frame, text="Transcribe", command=self._transcribe)
-        self._transcribe_btn.pack(side="left", padx=(0, 10))
+            self._transcribe_btn = ttk.Button(btn_frame, text="Transcribe", command=self._transcribe)
+            self._transcribe_btn.pack(side="left", padx=(0, 10))
 
-        self._status_label = ttk.Label(btn_frame, text="")
-        self._status_label.pack(side="left")
+            self._status_label = ttk.Label(btn_frame, text="")
+            self._status_label.pack(side="left")
 
-        # Results text area
+        # Results text area (both modes)
         self._text = tk.Text(main, bg="#313244", fg="#cdd6f4", font=("Consolas", 10),
                              wrap="word", state="disabled")
         self._text.pack(fill="both", expand=True, pady=(0, 10))
 
-        # Bottom buttons
+        # Bottom buttons — copy + close both modes; save only in full mode
         bottom = ttk.Frame(main)
         bottom.pack(fill="x")
 
         ttk.Button(bottom, text="Copy to clipboard", command=self._copy).pack(side="left", padx=(0, 10))
-        ttk.Button(bottom, text="Save as .txt", command=self._save).pack(side="left", padx=(0, 10))
+        if not self._minimal:
+            ttk.Button(bottom, text="Save as .txt", command=self._save).pack(side="left", padx=(0, 10))
+            root.drop_target_register = None  # tkdnd not available by default
         ttk.Button(bottom, text="Close", command=root.destroy).pack(side="right")
 
-        # Support file drop via command line args or drag
-        root.drop_target_register = None  # tkdnd not available by default
+        # Auto-start in minimal mode; full mode waits for the Transcribe button
+        if self._minimal:
+            threading.Thread(target=self._do_transcribe, args=(self._preload_filepath,), daemon=True).start()
 
         root.mainloop()
 
@@ -127,15 +160,20 @@ class TranscribeFileWindow:
         try:
             start = time.time()
 
-            # Build kwargs
+            # Build kwargs — minimal mode pulls lang/timestamps from config;
+            # full mode pulls them from the UI widgets.
             kwargs = {"beam_size": 5, "vad_filter": True}
-            lang = self._lang_var.get()
+            if self._minimal:
+                lang = self._config.get("language", "en")
+                include_timestamps = self._config.get("include_timestamps", False)
+            else:
+                lang = self._lang_var.get()
+                include_timestamps = self._timestamps_var.get()
             if lang != "auto":
                 kwargs["language"] = lang
 
             segments, info = self._model.transcribe(filepath, **kwargs)
 
-            include_timestamps = self._timestamps_var.get()
             lines = []
             full_text = []
 
@@ -167,7 +205,8 @@ class TranscribeFileWindow:
             self._root.after(0, lambda: self._status_label.config(text="Error"))
 
         finally:
-            self._root.after(0, lambda: self._transcribe_btn.config(state="normal"))
+            if hasattr(self, '_transcribe_btn'):
+                self._root.after(0, lambda: self._transcribe_btn.config(state="normal"))
 
     def _set_text(self, text):
         def _update():

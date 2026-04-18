@@ -112,97 +112,10 @@ def transcribe(filepath):
     print(f"Loading Whisper model ({model_size})...")
     model = WhisperModel(model_size, device="cpu", compute_type="int8")
 
-    # Open transcription window with file pre-selected
+    # Open transcription window with file pre-selected (minimal mode —
+    # auto-starts transcription, no file picker / options / save button).
     from transcribe_file import TranscribeFileWindow
-    win = TranscribeFileWindow(model, config)
-    win._preload_file = filepath
-    _run_with_preload(win, filepath)
-
-
-def _run_with_preload(win, filepath):
-    """Run the transcription window with a file pre-loaded."""
-    import tkinter as tk
-    from tkinter import ttk
-    import threading
-    import time
-
-    from ui_theme import apply_dark_theme
-
-    root = tk.Tk()
-    root.title("Koda — Transcribe Audio File")
-    root.geometry("650x500")
-
-    apply_dark_theme(root)
-
-    main = ttk.Frame(root, padding=20)
-    main.pack(fill="both", expand=True)
-
-    ttk.Label(main, text="Transcribe Audio File", style="Header.TLabel").pack(anchor="w", pady=(0, 10))
-
-    # File path display
-    ttk.Label(main, text=f"File: {os.path.basename(filepath)}").pack(anchor="w", pady=(0, 5))
-    ttk.Label(main, text=f"Path: {filepath}", wraplength=600).pack(anchor="w", pady=(0, 10))
-
-    status_label = ttk.Label(main, text="Transcribing... please wait.")
-    status_label.pack(anchor="w", pady=(0, 10))
-
-    text_widget = tk.Text(main, bg="#313244", fg="#cdd6f4", font=("Consolas", 10),
-                          wrap="word", state="disabled")
-    text_widget.pack(fill="both", expand=True, pady=(0, 10))
-
-    bottom = ttk.Frame(main)
-    bottom.pack(fill="x")
-
-    def copy_text():
-        content = text_widget.get("1.0", "end").strip()
-        if content:
-            root.clipboard_clear()
-            root.clipboard_append(content)
-            status_label.config(text="Copied to clipboard!")
-
-    ttk.Button(bottom, text="Copy to clipboard", command=copy_text).pack(side="left", padx=(0, 10))
-    ttk.Button(bottom, text="Close", command=root.destroy).pack(side="right")
-
-    def do_transcribe():
-        try:
-            start = time.time()
-            kwargs = {"beam_size": 5, "vad_filter": True}
-            lang = win._config.get("language", "en")
-            if lang != "auto":
-                kwargs["language"] = lang
-
-            segments, info = win._model.transcribe(filepath, **kwargs)
-            result_parts = []
-            for seg in segments:
-                result_parts.append(seg.text.strip())
-
-            result = " ".join(result_parts)
-            duration = time.time() - start
-            detected_lang = getattr(info, 'language', lang)
-
-            header = f"Language: {detected_lang} | Transcribed in {duration:.1f}s\n"
-            header += "\u2500" * 50 + "\n\n"
-
-            def update_ui():
-                text_widget.config(state="normal")
-                text_widget.delete("1.0", "end")
-                text_widget.insert("1.0", header + result)
-                text_widget.config(state="disabled")
-                status_label.config(text=f"Done in {duration:.1f}s")
-
-            root.after(0, update_ui)
-
-        except Exception as e:
-            def show_error():
-                text_widget.config(state="normal")
-                text_widget.delete("1.0", "end")
-                text_widget.insert("1.0", f"Error: {e}")
-                text_widget.config(state="disabled")
-                status_label.config(text="Error")
-            root.after(0, show_error)
-
-    threading.Thread(target=do_transcribe, daemon=True).start()
-    root.mainloop()
+    TranscribeFileWindow(model, config, preload_filepath=filepath, minimal=True).show(blocking=True)
 
 
 if __name__ == "__main__":
