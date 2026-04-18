@@ -16,3 +16,6 @@ koda_stats.db
 .claude/
 .forge-clean/
 .forge-test/
+.deslop/
+.deep-review/
+.migrate-safely/
