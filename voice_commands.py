@@ -258,12 +258,8 @@ _COMPILED_COMMANDS = [
     for pattern, action, desc in VOICE_COMMANDS
 ]
 
-# Also compile for prefix/suffix extraction (command at start or end of text)
-_PREFIX_COMMANDS = [
-    (re.compile(r"^\s*" + pattern + r"[\s,.!?]+", re.IGNORECASE), action, desc)
-    for pattern, action, desc in VOICE_COMMANDS
-    if desc not in _WHOLE_UTTERANCE_ONLY
-]
+# Compile for suffix extraction (command at end of text).
+# Prefix matching (command at start) was removed — see session-33 handover.
 _SUFFIX_COMMANDS = [
     (re.compile(r"[\s,.!?]+" + pattern + r"\s*[.!?]?\s*$", re.IGNORECASE), action, desc)
     for pattern, action, desc in VOICE_COMMANDS
@@ -280,9 +276,6 @@ def register_extra_commands(commands):
     for pattern, action, desc in commands:
         _COMPILED_COMMANDS.append(
             (re.compile(r"^\s*" + pattern + r"\s*[.!?]?\s*$", re.IGNORECASE), action, desc)
-        )
-        _PREFIX_COMMANDS.append(
-            (re.compile(r"^\s*" + pattern + r"[\s,.!?]+", re.IGNORECASE), action, desc)
         )
         _SUFFIX_COMMANDS.append(
             (re.compile(r"[\s,.!?]+" + pattern + r"\s*[.!?]?\s*$", re.IGNORECASE), action, desc)

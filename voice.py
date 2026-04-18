@@ -25,7 +25,7 @@ import pyautogui
 import pystray
 from PIL import Image, ImageDraw
 
-from config import load_config, save_config, open_config_file
+from config import load_config, save_config
 from text_processing import process_text, apply_custom_vocabulary
 from history import init_db, save_transcription
 from overlay import KodaOverlay
