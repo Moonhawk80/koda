@@ -1311,7 +1311,14 @@ class TestFillerWordsManager(unittest.TestCase):
                 words = load_filler_words()
             self.assertEqual(words, list(DEFAULT_FILLER_WORDS))
         finally:
-            os.unlink(tmp_path)
+            # Post-HP1-fix (commit b4d4bae): load_filler_words renames the
+            # corrupt file to .corrupt.<ts> before returning defaults, so
+            # tmp_path itself no longer exists — clean up renamed variants.
+            for leftover in glob.glob(f"{tmp_path}*"):
+                try:
+                    os.unlink(leftover)
+                except OSError:
+                    pass
 
     def test_load_empty_list_is_valid(self):
         with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
