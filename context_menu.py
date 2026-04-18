@@ -126,16 +126,13 @@ def _run_with_preload(win, filepath):
     import threading
     import time
 
+    from ui_theme import apply_dark_theme
+
     root = tk.Tk()
     root.title("Koda — Transcribe Audio File")
     root.geometry("650x500")
-    root.configure(bg="#1e1e2e")
 
-    style = ttk.Style()
-    style.theme_use("clam")
-    style.configure("TLabel", background="#1e1e2e", foreground="#cdd6f4", font=("Segoe UI", 10))
-    style.configure("Header.TLabel", background="#1e1e2e", foreground="#89b4fa", font=("Segoe UI", 12, "bold"))
-    style.configure("TButton", font=("Segoe UI", 10))
+    apply_dark_theme(root)
 
     main = ttk.Frame(root, padding=20)
     main.pack(fill="both", expand=True)

@@ -18,20 +18,18 @@ class StatsDashboard:
         self._thread.start()
 
     def _run(self):
+        from ui_theme import apply_dark_theme, BG, BG_ALT, FG_PRIMARY, FG_GREEN, FG_MUTED
+
         root = tk.Tk()
         root.title("Koda — Usage Stats")
         root.geometry("500x580")
-        root.configure(bg="#1e1e2e")
         root.resizable(False, False)
 
-        style = ttk.Style()
-        style.theme_use("clam")
-        style.configure("TLabel", background="#1e1e2e", foreground="#cdd6f4", font=("Segoe UI", 10))
-        style.configure("Header.TLabel", background="#1e1e2e", foreground="#89b4fa", font=("Segoe UI", 14, "bold"))
-        style.configure("Big.TLabel", background="#1e1e2e", foreground="#a6e3a1", font=("Segoe UI", 24, "bold"))
-        style.configure("Unit.TLabel", background="#1e1e2e", foreground="#a6adc8", font=("Segoe UI", 9))
-        style.configure("Stat.TLabel", background="#313244", foreground="#cdd6f4", font=("Segoe UI", 10))
-        style.configure("TButton", font=("Segoe UI", 10))
+        style = apply_dark_theme(root, header_size=14)
+        # stats-specific extras (not shared with other dark-theme windows)
+        style.configure("Big.TLabel", background=BG, foreground=FG_GREEN, font=("Segoe UI", 24, "bold"))
+        style.configure("Unit.TLabel", background=BG, foreground=FG_MUTED, font=("Segoe UI", 9))
+        style.configure("Stat.TLabel", background=BG_ALT, foreground=FG_PRIMARY, font=("Segoe UI", 10))
 
         main = ttk.Frame(root, padding=20)
         main.pack(fill="both", expand=True)
