@@ -77,11 +77,12 @@ DEFAULT_CONFIG = {
 }
 
 
-def _deep_merge(base, override):
+def deep_merge(base, override):
+    """Recursively merge override into base (returns new dict)."""
     merged = base.copy()
     for key, value in override.items():
         if key in merged and isinstance(merged[key], dict) and isinstance(value, dict):
-            merged[key] = _deep_merge(merged[key], value)
+            merged[key] = deep_merge(merged[key], value)
         else:
             merged[key] = value
     return merged
@@ -91,7 +92,7 @@ def load_config():
     if os.path.exists(CONFIG_PATH):
         with open(CONFIG_PATH, "r", encoding="utf-8") as f:
             user_config = json.load(f)
-        return _deep_merge(DEFAULT_CONFIG, user_config)
+        return deep_merge(DEFAULT_CONFIG, user_config)
     else:
         save_config(DEFAULT_CONFIG)
         return DEFAULT_CONFIG.copy()

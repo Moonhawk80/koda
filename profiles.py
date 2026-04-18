@@ -15,6 +15,8 @@ import json
 import threading
 import time
 
+from config import deep_merge
+
 logger = logging.getLogger("koda")
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -164,17 +166,6 @@ def match_profile(profiles, process_name, window_title):
             return (name, profile.get("settings", {}))
 
     return (None, {})
-
-
-def deep_merge(base, override):
-    """Deep merge override into base (returns new dict)."""
-    merged = base.copy()
-    for key, value in override.items():
-        if key in merged and isinstance(merged[key], dict) and isinstance(value, dict):
-            merged[key] = deep_merge(merged[key], value)
-        else:
-            merged[key] = value
-    return merged
 
 
 # --- Profile monitor thread ---

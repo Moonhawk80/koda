@@ -10,27 +10,18 @@ import logging
 import os
 import sys
 
+from config import CONFIG_PATH, CUSTOM_WORDS_PATH, load_config, save_config
+
 logger = logging.getLogger("koda")
 
+# Directory containing this file — used for in-source (non-frozen) subprocess
+# launch of voice.py. Intentionally NOT derived from config.CONFIG_DIR because
+# in a frozen exe, CONFIG_DIR points at %APPDATA%\Koda while voice.py lives
+# wherever the source tree is; these paths only coincide in dev mode.
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-CONFIG_PATH = os.path.join(SCRIPT_DIR, "config.json")
-
-
-def load_config():
-    if os.path.exists(CONFIG_PATH):
-        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return {}
-
-
-def save_config(cfg):
-    with open(CONFIG_PATH, "w", encoding="utf-8") as f:
-        json.dump(cfg, f, indent=2)
 
 
 class KodaSettings(tk.Tk):
-    CUSTOM_WORDS_PATH = os.path.join(SCRIPT_DIR, "custom_words.json")
-
     def __init__(self):
         super().__init__()
         self.title("Koda Settings")
@@ -685,9 +676,9 @@ class KodaSettings(tk.Tk):
 
     def _load_custom_words_data(self):
         """Load custom_words.json into an ordered dict."""
-        if os.path.exists(self.CUSTOM_WORDS_PATH):
+        if os.path.exists(CUSTOM_WORDS_PATH):
             try:
-                with open(self.CUSTOM_WORDS_PATH, "r", encoding="utf-8") as f:
+                with open(CUSTOM_WORDS_PATH, "r", encoding="utf-8") as f:
                     data = json.load(f)
                     return dict(data) if isinstance(data, dict) else {}
             except (json.JSONDecodeError, OSError) as e:
@@ -696,7 +687,7 @@ class KodaSettings(tk.Tk):
 
     def _save_custom_words_data(self):
         """Write _custom_words back to custom_words.json."""
-        with open(self.CUSTOM_WORDS_PATH, "w", encoding="utf-8") as f:
+        with open(CUSTOM_WORDS_PATH, "w", encoding="utf-8") as f:
             json.dump(self._custom_words, f, indent=2)
 
     def _refresh_vocab_tree(self):
