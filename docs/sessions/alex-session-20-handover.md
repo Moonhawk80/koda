@@ -1,7 +1,7 @@
-# Alex Session 20 Handover — 2026-04-18 (forge-clean Phase 1)
+# Alex Session 20 Handover — 2026-04-18 (forge-clean Phases 1 + 2)
 
 ## Branch
-`chore/forge-clean` — **NOT merged to master yet.** 2 code commits + this handover doc. Master untouched. Tests: 360/360 passing on the branch.
+`chore/forge-clean` — **NOT merged to master yet.** 4 code commits + 2 handover updates. Master untouched. Tests: 360/360 passing on the branch.
 
 Backup zip at `C:\Backups\koda-pre-forge-clean-2026-04-18.zip` (pre-cleanup snapshot via `git archive HEAD`).
 
@@ -9,12 +9,12 @@ Backup zip at `C:\Backups\koda-pre-forge-clean-2026-04-18.zip` (pre-cleanup snap
 
 Ran the `forge-clean` skill on koda — a whole-codebase audit across 7 tracks (dead code, AI slop, deduplication, type consolidation, type strengthening, error handling, circular deps). Reports in `.forge-clean/run-20260418-022925/`.
 
-**Phase 1 applied (safe cleanup, on branch):**
+**Phase 1 applied (safe cleanup):**
 - Track 1 (dead code) — 7 of 8 HIGH items. Skipped `toggle_overlay` pending product call.
 - Track 3 (deduplication) — both HIGH items.
 
-**Phase 2 pending (behavior-change decisions needed):**
-- Track 6 (error handling) — 6 HIGH items. Real bugs. See "Phase 2 backlog" below.
+**Phase 2 applied (behavior changes — stop silent failures):**
+- Track 6 (error handling) — all 6 HIGH items across 3 categories. See "Phase 2 Applied" below.
 
 ## Commits on `chore/forge-clean`
 
@@ -29,6 +29,17 @@ Ran the `forge-clean` skill on koda — a whole-codebase audit across 7 tracks (
    - settings_gui.py: `_open_custom_words()` delegates to the new config helper
    - voice.py: extract `dedup_segments(segments)` helper; `_transcribe_and_paste` uses it
    - test_e2e.py: both segment-dedup tests now call `voice.dedup_segments` instead of reimplementing the loop (tests now actually exercise production code)
+
+3. `6777ce1` — Stop swallowing errors silently (Track 6 HIGH, all 6)
+   - profiles.py: `load_profiles` narrows catch to `(JSONDecodeError, OSError)`, backs up corrupt file as `profiles.json.corrupt.<ts>`, logs warning
+   - text_processing.py: `load_filler_words` narrows catch + warning
+   - settings_gui.py: `_load_custom_words_data` narrows catch + error log
+   - formula_mode.py: both Excel `ListObjects.Add` catches promoted from `logger.debug` → `logger.warning`
+   - voice.py: `check_vad_silence` logs one-shot warning on first Silero failure (then silent)
+   - Added `import logging` + `logger = logging.getLogger("koda")` to profiles.py, text_processing.py, settings_gui.py
+   - **36 insertions, 11 deletions across 5 files**
+
+4. `3c71448` — Finalize: gitignore `.forge-clean/`, update this handover
 
 ## Skipped Intentionally
 
