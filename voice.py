@@ -301,6 +301,26 @@ def dedup_segments(segments):
     return " ".join(seg_texts).strip()
 
 
+def _discover_bundled_models(base_dir):
+    """Return sorted list of bundled model sizes present at base_dir.
+
+    PyInstaller bundles each model as a directory `_model_<size>` inside the
+    frozen exe's extraction dir. A stale user config may point at a size the
+    installer didn't ship — we use this to pick a working fallback instead of
+    erroring out with "try reinstalling".
+    """
+    prefix = "_model_"
+    try:
+        entries = os.listdir(base_dir)
+    except OSError:
+        return []
+    return sorted(
+        name[len(prefix):]
+        for name in entries
+        if name.startswith(prefix) and os.path.isdir(os.path.join(base_dir, name))
+    )
+
+
 def load_whisper_model():
     global model
     from faster_whisper import WhisperModel
@@ -310,8 +330,9 @@ def load_whisper_model():
 
     base_dir = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
     bundled = os.path.join(base_dir, f"_model_{model_size}")
-    logger.debug("Model search: base_dir=%s, bundled_path=%s, exists=%s",
-                 base_dir, bundled, os.path.isdir(bundled))
+    bundled_sizes = _discover_bundled_models(base_dir)
+    logger.debug("Model search: base_dir=%s, bundled_path=%s, exists=%s, bundled_sizes=%s",
+                 base_dir, bundled, os.path.isdir(bundled), bundled_sizes)
 
     def _load(m_size, dev, c_type):
         b = os.path.join(base_dir, f"_model_{m_size}")
@@ -321,27 +342,60 @@ def load_whisper_model():
         logger.debug("Bundled model not found at %s — loading by name (may download)", b)
         return WhisperModel(m_size, device=dev, compute_type=c_type)
 
+    def _try_bundled_fallback(original_error):
+        global model
+        alt = next((s for s in bundled_sizes if s != model_size), None)
+        if alt is None:
+            return False
+        logger.warning(
+            "Configured model '%s' unavailable (%s) — falling back to bundled '%s'",
+            model_size, original_error, alt,
+        )
+        error_notify(f"Model '{model_size}' unavailable — using bundled '{alt}'.")
+        try:
+            fallback = _load(alt, "cpu", "int8")
+        except Exception as e:
+            logger.error("Bundled fallback '%s' also failed: %s", alt, e, exc_info=True)
+            return False
+        model = fallback
+        config["model_size"] = alt
+        config["compute_type"] = "int8"
+        try:
+            save_config(config)
+        except Exception as e:
+            logger.warning("Could not persist fallback model_size: %s", e)
+        logger.info("Bundled fallback model '%s' loaded", alt)
+        return True
+
     try:
         model = _load(model_size, device, compute_type)
         logger.info("Whisper model '%s' loaded (device=%s, compute=%s)", model_size, device, compute_type)
+        return
     except Exception as e:
-        if device == "cuda":
-            # GPU failed — fall back to CPU Standard Mode automatically
-            logger.warning("GPU load failed (%s) — falling back to CPU Standard Mode", e)
-            error_notify("GPU unavailable — Koda switched to Standard Mode.")
+        primary_error = e
+
+    if device == "cuda":
+        logger.warning("GPU load failed (%s) — falling back to CPU Standard Mode", primary_error)
+        error_notify("GPU unavailable — Koda switched to Standard Mode.")
+        try:
+            model = _load(model_size, "cpu", "int8")
+            config["compute_type"] = "int8"
             try:
-                model = _load("small", "cpu", "int8")
-                config["compute_type"] = "int8"
-                config["model_size"] = "small"
-                logger.info("Fallback to small/cpu/int8 succeeded")
-            except Exception as e2:
-                logger.error("Fallback model load also failed: %s", e2, exc_info=True)
-                error_notify("Failed to load speech model. Check your installation.")
-                raise
-        else:
-            logger.error("Failed to load Whisper model: %s", e, exc_info=True)
-            error_notify(f"Failed to load speech model '{model_size}'. Try reinstalling Koda.")
-            raise
+                save_config(config)
+            except Exception as e:
+                logger.warning("Could not persist compute_type: %s", e)
+            logger.info("Fallback to %s/cpu/int8 succeeded", model_size)
+            return
+        except Exception as e2:
+            logger.warning("CPU fallback of configured model also failed: %s", e2)
+            primary_error = e2
+
+    if _try_bundled_fallback(primary_error):
+        return
+
+    logger.error("Failed to load Whisper model '%s': %s", model_size, primary_error, exc_info=primary_error)
+    error_notify(f"Failed to load speech model '{model_size}'. Try reinstalling Koda.")
+    raise primary_error
 
 
 # ============================================================

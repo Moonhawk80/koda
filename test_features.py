@@ -2267,5 +2267,103 @@ class TestRestartRequiredChanges(unittest.TestCase):
         self.assertEqual(result, ["model_size", "hotkey_dictation"])
 
 
+# ============================================================
+# Whisper model load — bundled fallback (regression)
+# Reason: a stale AppData config pointing at a model_size the installer didn't
+# bundle used to crash with "try reinstalling" even when a different model
+# was bundled. Fall back to whatever's actually in the exe.
+# ============================================================
+
+
+class TestDiscoverBundledModels(unittest.TestCase):
+    def setUp(self):
+        import voice
+        self.voice = voice
+
+    def test_returns_empty_when_no_bundled_dirs(self):
+        with tempfile.TemporaryDirectory() as d:
+            os.makedirs(os.path.join(d, "some_other_dir"))
+            self.assertEqual(self.voice._discover_bundled_models(d), [])
+
+    def test_discovers_bundled_dirs_by_prefix(self):
+        with tempfile.TemporaryDirectory() as d:
+            os.makedirs(os.path.join(d, "_model_small"))
+            os.makedirs(os.path.join(d, "_model_tiny"))
+            os.makedirs(os.path.join(d, "unrelated"))
+            self.assertEqual(self.voice._discover_bundled_models(d), ["small", "tiny"])
+
+    def test_ignores_non_directory_entries_with_prefix(self):
+        with tempfile.TemporaryDirectory() as d:
+            os.makedirs(os.path.join(d, "_model_small"))
+            with open(os.path.join(d, "_model_stray.txt"), "w") as f:
+                f.write("not a directory")
+            self.assertEqual(self.voice._discover_bundled_models(d), ["small"])
+
+    def test_returns_empty_when_base_dir_missing(self):
+        self.assertEqual(
+            self.voice._discover_bundled_models("/nonexistent-path-xyz-qwe"),
+            [],
+        )
+
+
+class TestLoadWhisperModelBundledFallback(unittest.TestCase):
+    def setUp(self):
+        import sys as _sys
+        import voice
+        self.voice = voice
+        self.sys = _sys
+        self._saved_config = dict(voice.config)
+        self._saved_model = getattr(voice, "model", None)
+        self._saved_meipass = getattr(_sys, "_MEIPASS", None)
+
+    def tearDown(self):
+        self.voice.config.clear()
+        self.voice.config.update(self._saved_config)
+        self.voice.model = self._saved_model
+        if self._saved_meipass is None:
+            if hasattr(self.sys, "_MEIPASS"):
+                del self.sys._MEIPASS
+        else:
+            self.sys._MEIPASS = self._saved_meipass
+
+    def test_falls_back_when_configured_size_not_bundled(self):
+        with tempfile.TemporaryDirectory() as d:
+            os.makedirs(os.path.join(d, "_model_small"))
+            self.sys._MEIPASS = d
+            self.voice.config["model_size"] = "base"
+            self.voice.config["compute_type"] = "int8"
+
+            fake_model = object()
+
+            def fake_whisper_ctor(arg, device=None, compute_type=None):
+                if isinstance(arg, str) and arg.replace("\\", "/").endswith("/_model_small"):
+                    return fake_model
+                raise RuntimeError(f"cannot load: {arg!r}")
+
+            with patch("faster_whisper.WhisperModel", side_effect=fake_whisper_ctor), \
+                 patch("voice.error_notify"), \
+                 patch("voice.save_config"):
+                self.voice.load_whisper_model()
+
+            self.assertIs(self.voice.model, fake_model)
+            self.assertEqual(self.voice.config["model_size"], "small")
+            self.assertEqual(self.voice.config["compute_type"], "int8")
+
+    def test_raises_when_neither_configured_nor_bundled_load(self):
+        with tempfile.TemporaryDirectory() as d:
+            self.sys._MEIPASS = d
+            self.voice.config["model_size"] = "base"
+            self.voice.config["compute_type"] = "int8"
+
+            def always_fail(arg, device=None, compute_type=None):
+                raise RuntimeError("no model available")
+
+            with patch("faster_whisper.WhisperModel", side_effect=always_fail), \
+                 patch("voice.error_notify"), \
+                 patch("voice.save_config"):
+                with self.assertRaises(RuntimeError):
+                    self.voice.load_whisper_model()
+
+
 if __name__ == "__main__":
     unittest.main()
