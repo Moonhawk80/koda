@@ -99,16 +99,17 @@ No reworks this segment. Course was clean once debug.log arrived.
 
 ## Waiting On
 
-- **CI run on `v4.3.1` tag** — workflow `24691728484` triggered on push. Expected ~6-7 min (matches v4.3.0 run at 6m36s). Produces `KodaSetup-4.3.1.exe` on the GitHub Releases page via `softprops/action-gh-release@v2`. If it fails, re-tag pattern from session 40 applies: `git push origin :refs/tags/v4.3.1`, fix, re-tag, re-push.
-- **Coworker install of v4.3.1** — user needs to upload `dist/KodaSetup-4.3.1.exe` to Google Drive (OR just share the GitHub Releases URL once CI succeeds) and re-share. Confirmation that (a) installer warning reads correctly on a no-mic PC, (b) plug-in recovery works end-to-end in his environment.
+- **CI run on `v4.3.1` tag** — ✅ Succeeded in 7m15s. Run `24691728484`, release published at https://github.com/Moonhawk80/koda/releases/tag/v4.3.1 with `KodaSetup-4.3.1.exe` attached. Released by github-actions[bot] at 2026-04-20T21:45:45Z.
+- **Coworker install of v4.3.1** — re-share either the public GitHub URL or the local `dist/KodaSetup-4.3.1.exe` (both are byte-equivalent). Confirmation needed that (a) installer warning reads correctly on a no-mic PC, (b) plug-in recovery works end-to-end in his environment.
+- **Node.js 20 deprecation (non-blocking)** — CI annotation flagged that `actions/cache@v4`, `actions/checkout@v4`, `actions/setup-python@v5`, `softprops/action-gh-release@v2` still run on Node 20, which is removed from GitHub Actions runners on 2026-09-16 (forced Node 24 default on 2026-06-02). Track as low-priority CI maintenance before June.
 
 ## Next Session Priorities
 
-1. **Confirm CI succeeded** — check https://github.com/Moonhawk80/koda/releases/tag/v4.3.1 exists and has `KodaSetup-4.3.1.exe` attached. If CI failed, diagnose + re-tag.
-2. **Coworker confirmation** — wait for his report after installing 4.3.1. If the mic recovery works end-to-end, close the loop. If any followup surfaces, triage.
-3. **Phase 9 RDP test** — still pending since session 35. Not addressed this session.
-4. **Phase 16 license system** — 3 decisions still blocked (subscription vs. one-time, offline activation, tier count). Not addressed this session.
-5. **Home-PC smoke test of 4.3.0/4.3.1** — carried forward from session 40, still pending.
+1. **Coworker confirmation** — re-share v4.3.1 (public URL or Google Drive file), wait for his report. If mic recovery works end-to-end, close the loop. If any followup surfaces, triage.
+2. **Phase 9 RDP test** — still pending since session 35. Not addressed this session.
+3. **Phase 16 license system** — 3 decisions still blocked (subscription vs. one-time, offline activation, tier count). Not addressed this session.
+4. **Home-PC smoke test of 4.3.0/4.3.1** — carried forward from session 40, still pending.
+5. **Node 20 → Node 24 CI migration** — low priority, schedule before 2026-06-02.
 
 ## Files Changed
 
@@ -144,6 +145,7 @@ None this session. No DB or schema changes.
 | `test_features.py` on `fix/mic-hotplug-after-startup` | 355 | ✅ +2 from `TestStartRecordingNoMic` |
 | Inno Setup `/O-` syntax compile | — | ✅ 0.015s successful on koda.iss |
 | Local full build | — | ✅ `dist/KodaSetup-4.3.1.exe` at 534 MB |
+| CI release build on `v4.3.1` tag | — | ✅ 7m15s, run `24691728484`, release published to GitHub Releases page |
 
 ## New session prompt
 
@@ -153,14 +155,14 @@ cd C:\Users\alex\Projects\koda
 Continue from work-PC session 41 handover (docs/sessions/alex-session-41-work-pc-handover.md).
 
 ## What we were working on
-Diagnosed + shipped a hotfix for a real-world mic-hotplug bug reported on a coworker's PC: he installed v4.3.0 with headset unplugged, Koda's startup `sd.InputStream()` failed, and the watchdog's null-stream check left the app permanently broken until restart. PR #23 fixed the watchdog to recover null streams, added error-sound UX when Ctrl+Space fires with no mic, and added a "NO MICROPHONE DETECTED" warning to the installer wizard. Version bumped to 4.3.1. PRs #22 and #23 merged, `v4.3.1` tag pushed, CI running.
+Diagnosed + shipped a hotfix for a real-world mic-hotplug bug reported on a coworker's PC: he installed v4.3.0 with headset unplugged, Koda's startup `sd.InputStream()` failed, and the watchdog's null-stream check left the app permanently broken until restart. PR #23 fixed the watchdog to recover null streams, added error-sound UX when Ctrl+Space fires with no mic, and added a "NO MICROPHONE DETECTED" warning to the installer wizard. Version bumped to 4.3.1. PRs #22 and #23 merged, `v4.3.1` tag pushed, CI built and published the public release at https://github.com/Moonhawk80/koda/releases/tag/v4.3.1 in 7m15s. Ready to re-share with the coworker.
 
 ## Next up
-1. Confirm CI succeeded at https://github.com/Moonhawk80/koda/releases/tag/v4.3.1 — `KodaSetup-4.3.1.exe` should be attached
-2. Re-share the installer with the coworker (public URL OR local `dist/KodaSetup-4.3.1.exe`); confirm plug-in recovery works end-to-end on his machine
-3. Phase 9 RDP test (pending since session 35)
-4. Phase 16 license-system decisions (subscription vs. one-time, offline activation, tier count) — still blocked, still not made
-5. Home-PC smoke test of the public 4.3.0/4.3.1 installer on the home PC
+1. Re-share the v4.3.1 installer with the coworker (public URL https://github.com/Moonhawk80/koda/releases/tag/v4.3.1 OR local `dist/KodaSetup-4.3.1.exe`); confirm plug-in recovery works end-to-end on his machine
+2. Phase 9 RDP test (pending since session 35)
+3. Phase 16 license-system decisions (subscription vs. one-time, offline activation, tier count) — still blocked, still not made
+4. Home-PC smoke test of the public 4.3.0/4.3.1 installer on the home PC
+5. Low-priority CI maintenance: bump GitHub Actions to Node 24 before 2026-06-02
 
 ## Key context
 - v4.3.1 on master at `9b33c50`. Working tree clean.
