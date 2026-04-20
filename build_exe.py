@@ -4,11 +4,32 @@ import os
 import shutil
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-MODEL_DIR = os.path.expanduser("~/.cache/huggingface/hub/models--Systran--faster-whisper-small/snapshots/536b0662742c02347bc0e980a01041f333bce120")
+
+
+def _find_whisper_model(model_name="small"):
+    """Find the cached Whisper model snapshot directory dynamically.
+
+    faster-whisper stores models at:
+      ~/.cache/huggingface/hub/models--Systran--faster-whisper-{name}/snapshots/{hash}/
+
+    The hash changes when Hugging Face updates the model. This finds whichever
+    snapshot is present rather than requiring a hardcoded hash — important for
+    CI builds where the model is freshly downloaded.
+    """
+    base = os.path.expanduser(
+        f"~/.cache/huggingface/hub/models--Systran--faster-whisper-{model_name}/snapshots"
+    )
+    if not os.path.isdir(base):
+        return None
+    snapshots = sorted(os.listdir(base))
+    return os.path.join(base, snapshots[-1]) if snapshots else None
+
+
+MODEL_DIR = _find_whisper_model("small")
 
 # Copy model to a local dir for bundling
 bundle_model = os.path.join(SCRIPT_DIR, "_model_small")
-if os.path.exists(MODEL_DIR):
+if MODEL_DIR and os.path.exists(MODEL_DIR):
     if os.path.exists(bundle_model):
         shutil.rmtree(bundle_model)
     shutil.copytree(MODEL_DIR, bundle_model)

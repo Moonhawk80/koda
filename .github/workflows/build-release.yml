@@ -1,0 +1,80 @@
+name: Build and Release
+
+# Triggers when you push a version tag: git tag v4.3.0 && git push --tags
+# GitHub Actions builds the installer and attaches it to the release automatically.
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+# Needs write access to create/update GitHub Releases
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.14
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt pyinstaller
+
+      # Cache the 462 MB Whisper small model between runs.
+      # Key includes the model name — bust it if you upgrade the model.
+      - name: Cache Whisper model
+        uses: actions/cache@v4
+        id: model-cache
+        with:
+          path: ~\.cache\huggingface
+          key: whisper-small-v1
+
+      # Only downloads if cache missed (first run or cache busted)
+      - name: Download Whisper small model
+        if: steps.model-cache.outputs.cache-hit != 'true'
+        run: |
+          python -c "from faster_whisper import WhisperModel; WhisperModel('small', device='cpu', compute_type='int8')"
+
+      # Extract version number from the tag (v4.3.0 → 4.3.0)
+      - name: Extract version from tag
+        id: version
+        shell: bash
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+
+      # Patch the version in koda.iss so the installer filename matches the tag
+      - name: Update version in koda.iss
+        shell: pwsh
+        run: |
+          $ver = "${{ steps.version.outputs.VERSION }}"
+          (Get-Content installer\koda.iss) `
+            -replace '#define MyAppVersion ".*"', "#define MyAppVersion `"$ver`"" `
+            | Set-Content installer\koda.iss
+          Write-Host "koda.iss version set to $ver"
+
+      # ~10 min. Bundles Koda.exe + Whisper small model into a single exe.
+      - name: Build Koda.exe
+        run: python build_exe.py
+
+      - name: Install Inno Setup
+        run: choco install innosetup --yes --no-progress
+
+      # Wraps Koda.exe into a proper Windows installer with wizard pages
+      - name: Build installer
+        run: python installer\build_installer.py
+
+      # Create GitHub Release and attach KodaSetup-{version}.exe
+      # If the release already exists (manually created), assets are appended.
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/KodaSetup-*.exe
+          draft: false
+          prerelease: false
+          generate_release_notes: true
