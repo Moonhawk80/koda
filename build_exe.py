@@ -1,9 +1,21 @@
 """Build Koda as a single .exe using PyInstaller, with bundled Whisper model."""
 import PyInstaller.__main__
+import importlib.util
 import os
 import shutil
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+def _find_faster_whisper_assets():
+    """Locate faster_whisper/assets dynamically — works for venv AND CI."""
+    spec = importlib.util.find_spec("faster_whisper")
+    if spec is None or spec.origin is None:
+        raise RuntimeError("faster_whisper not installed; run `pip install -r requirements.txt`")
+    return os.path.join(os.path.dirname(spec.origin), "assets")
+
+
+FASTER_WHISPER_ASSETS = _find_faster_whisper_assets()
 
 
 def _find_whisper_model(model_name="small"):
@@ -75,7 +87,7 @@ args = [
     f"--add-data={os.path.join(SCRIPT_DIR, 'sounds')};sounds",
     f"--add-data={os.path.join(SCRIPT_DIR, 'plugins')};plugins",
     # Bundle faster_whisper VAD model (required for transcription)
-    f"--add-data={os.path.join(SCRIPT_DIR, 'venv/Lib/site-packages/faster_whisper/assets')};faster_whisper/assets",
+    f"--add-data={FASTER_WHISPER_ASSETS};faster_whisper/assets",
     # Hidden imports for pystray, PIL, pyttsx3, multiprocessing
     "--hidden-import=pystray._win32",
     "--hidden-import=PIL._tkinter_finder",
