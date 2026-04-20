@@ -101,15 +101,17 @@ No reworks this segment. Course was clean once debug.log arrived.
 
 - **CI run on `v4.3.1` tag** — ✅ Succeeded in 7m15s. Run `24691728484`, release published at https://github.com/Moonhawk80/koda/releases/tag/v4.3.1 with `KodaSetup-4.3.1.exe` attached. Released by github-actions[bot] at 2026-04-20T21:45:45Z.
 - **Coworker install of v4.3.1** — re-share either the public GitHub URL or the local `dist/KodaSetup-4.3.1.exe` (both are byte-equivalent). Confirmation needed that (a) installer warning reads correctly on a no-mic PC, (b) plug-in recovery works end-to-end in his environment.
-- **Node.js 20 deprecation (non-blocking)** — CI annotation flagged that `actions/cache@v4`, `actions/checkout@v4`, `actions/setup-python@v5`, `softprops/action-gh-release@v2` still run on Node 20, which is removed from GitHub Actions runners on 2026-09-16 (forced Node 24 default on 2026-06-02). Track as low-priority CI maintenance before June.
+- **Node.js 20 → Node 24 CI bump** — addressed same session via PR #25 (`ci/bump-actions-node24`). Bumped `checkout` v4→v6, `setup-python` v5→v6, `cache` v4→v5, `softprops/action-gh-release` v2→v3. All four bumps are pure Node-runtime transitions per each publisher's release notes; API surfaces we use are unchanged. Not yet merged. Real validation only on the next `v*.*.*` tag; if CI fails, re-tag per PR #20 pattern.
+- **Music-bleed hallucinations (field report)** — user reported that during this session, background music at work was causing Koda to "type nonsense" during dictation. Diagnosis: classic Whisper issue of transcribing speaker output picked up by the built-in mic. Not a Koda bug. Recommended: enable `noise_reduction` in Settings (currently off by default), lower mic input gain in Windows Sound Settings, use a headset close to mouth. Did NOT modify config this session — user was still deciding whether to flip `noise_reduction` on.
 
 ## Next Session Priorities
 
-1. **Coworker confirmation** — re-share v4.3.1 (public URL or Google Drive file), wait for his report. If mic recovery works end-to-end, close the loop. If any followup surfaces, triage.
-2. **Phase 9 RDP test** — still pending since session 35. Not addressed this session.
-3. **Phase 16 license system** — 3 decisions still blocked (subscription vs. one-time, offline activation, tier count). Not addressed this session.
-4. **Home-PC smoke test of 4.3.0/4.3.1** — carried forward from session 40, still pending.
-5. **Node 20 → Node 24 CI migration** — low priority, schedule before 2026-06-02.
+1. **Merge PR #24 (this handover) + PR #25 (Node 24 CI bump)** — both docs/CI-only, low review burden.
+2. **Coworker confirmation** — re-share v4.3.1 (public URL preferred: https://github.com/Moonhawk80/koda/releases/tag/v4.3.1), wait for his report. If mic recovery works end-to-end, close the loop. If any followup surfaces, triage.
+3. **Music-bleed follow-up** — if user flips `noise_reduction` on and still sees nonsense, consider tightening Whisper's `no_speech_threshold` (0.6) and `log_prob_threshold` (-0.8) in `voice.py:757-758`. More invasive — trades false positives for dropped quiet speech.
+4. **Phase 9 RDP test** — still pending since session 35. Not addressed this session.
+5. **Phase 16 license system** — 3 decisions still blocked (subscription vs. one-time, offline activation, tier count). Not addressed this session.
+6. **Home-PC smoke test of 4.3.0/4.3.1** — carried forward from session 40, still pending.
 
 ## Files Changed
 
@@ -122,6 +124,7 @@ No reworks this segment. Course was clean once debug.log arrived.
 | `voice.py` | `fix/mic-hotplug-after-startup` @ `1395ba6` | VERSION "4.3.0" → "4.3.1" |
 | `installer/koda.iss` | `fix/mic-hotplug-after-startup` @ `1395ba6` | MyAppVersion "4.3.0" → "4.3.1" |
 | `dist/KodaSetup-4.3.1.exe` | untracked | Local installer build, 534 MB, for Google Drive share |
+| `.github/workflows/build-release.yml` | `ci/bump-actions-node24` @ `aae7057` | PR #25: bump all 4 actions to Node 24 runtime (checkout v4→v6, setup-python v5→v6, cache v4→v5, gh-release v2→v3) |
 
 ## Key Reminders
 
@@ -155,20 +158,24 @@ cd C:\Users\alex\Projects\koda
 Continue from work-PC session 41 handover (docs/sessions/alex-session-41-work-pc-handover.md).
 
 ## What we were working on
-Diagnosed + shipped a hotfix for a real-world mic-hotplug bug reported on a coworker's PC: he installed v4.3.0 with headset unplugged, Koda's startup `sd.InputStream()` failed, and the watchdog's null-stream check left the app permanently broken until restart. PR #23 fixed the watchdog to recover null streams, added error-sound UX when Ctrl+Space fires with no mic, and added a "NO MICROPHONE DETECTED" warning to the installer wizard. Version bumped to 4.3.1. PRs #22 and #23 merged, `v4.3.1` tag pushed, CI built and published the public release at https://github.com/Moonhawk80/koda/releases/tag/v4.3.1 in 7m15s. Ready to re-share with the coworker.
+Diagnosed + shipped a hotfix for a real-world mic-hotplug bug reported on a coworker's PC: he installed v4.3.0 with headset unplugged, Koda's startup `sd.InputStream()` failed, and the watchdog's null-stream check left the app permanently broken until restart. PR #23 fixed the watchdog to recover null streams, added error-sound UX when Ctrl+Space fires with no mic, and added a "NO MICROPHONE DETECTED" warning to the installer wizard. Version bumped to 4.3.1. PRs #22 and #23 merged, `v4.3.1` tag pushed, CI built and published the public release at https://github.com/Moonhawk80/koda/releases/tag/v4.3.1 in 7m15s. Also opened PR #25 to bump the CI workflow actions from Node 20 → Node 24 runtime ahead of GitHub's June 2026 deadline. Field report during the session: music playing in the background was causing Whisper to transcribe nonsense — advised noise_reduction + mic-gain fix, no config change made.
 
 ## Next up
-1. Re-share the v4.3.1 installer with the coworker (public URL https://github.com/Moonhawk80/koda/releases/tag/v4.3.1 OR local `dist/KodaSetup-4.3.1.exe`); confirm plug-in recovery works end-to-end on his machine
-2. Phase 9 RDP test (pending since session 35)
-3. Phase 16 license-system decisions (subscription vs. one-time, offline activation, tier count) — still blocked, still not made
-4. Home-PC smoke test of the public 4.3.0/4.3.1 installer on the home PC
-5. Low-priority CI maintenance: bump GitHub Actions to Node 24 before 2026-06-02
+1. Merge PR #24 (this handover) + PR #25 (Node 24 CI bump) — both low review burden
+2. Re-share the v4.3.1 installer with the coworker (public URL https://github.com/Moonhawk80/koda/releases/tag/v4.3.1); confirm plug-in recovery works end-to-end on his machine
+3. Music-bleed follow-up: if flipping `noise_reduction` on in Settings still produces nonsense during music, tighten Whisper's `no_speech_threshold` / `log_prob_threshold` in `voice.py:757-758`
+4. Phase 9 RDP test (pending since session 35)
+5. Phase 16 license-system decisions (subscription vs. one-time, offline activation, tier count) — still blocked, still not made
+6. Home-PC smoke test of the public 4.3.0/4.3.1 installer on the home PC
 
 ## Key context
 - v4.3.1 on master at `9b33c50`. Working tree clean.
-- Local installer at `C:\Users\alex\Projects\koda\dist\KodaSetup-4.3.1.exe` (534 MB) is identical to the CI build (same commit, same Inno Setup script). Either is safe to share with the coworker.
+- Two open PRs: #24 (docs/session-41 handover) and #25 (CI Node 24 bump). Both low-risk, ready to merge.
+- Local installer at `C:\Users\alex\Projects\koda\dist\KodaSetup-4.3.1.exe` (534 MB) is byte-equivalent to the CI-built public release.
 - PR #23 bundled the fix + version bump (hotfix deviation from the v4.3.0 separate-PR pattern). Acceptable for a one-concern hotfix; resume the separate-PR pattern for scheduled releases.
+- PR #25 CI bump is validated only by release-notes review (no way to test on branch since workflow runs on tag push). If next release tag fails, re-tag per PR #20 pattern.
 - Coworker post-install action: uncheck "Floating status overlay" in Settings → Save. His config has it enabled from the 4.2.0 era and Inno Setup's `onlyifdoesntexist` flag preserves user configs through upgrades.
+- User hit music-bleed hallucinations during this session — recommended noise_reduction + mic level down + headset, did NOT flip config yet.
 - Work-PC rule: PRs only on Moonhawk80/koda, no direct pushes to master.
 ```
 
