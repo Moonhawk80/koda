@@ -2414,5 +2414,143 @@ class TestStartRecordingNoMic(unittest.TestCase):
         self.assertFalse(self.voice.recording)
 
 
+# ============================================================
+# App launch — "open word" / "launch chrome" / "start powershell"
+# Reason: new verb extractor runs before voice_commands to avoid false
+# negatives. Prefix-only matching is reintroduced for launch verbs only,
+# which is the opposite of session 33's decision for editing commands —
+# lock that invariant down with tests so it doesn't silently regress.
+# ============================================================
+
+
+class TestAppLaunchIntent(unittest.TestCase):
+    def setUp(self):
+        import app_launch
+        self.app_launch = app_launch
+
+    def test_extracts_open_verb(self):
+        app, _ = self.app_launch.extract_launch_intent("open word")
+        self.assertEqual(app, "word")
+
+    def test_extracts_launch_verb(self):
+        app, _ = self.app_launch.extract_launch_intent("launch chrome")
+        self.assertEqual(app, "chrome")
+
+    def test_extracts_start_verb(self):
+        app, _ = self.app_launch.extract_launch_intent("start powershell")
+        self.assertEqual(app, "powershell")
+
+    def test_case_insensitive(self):
+        app, _ = self.app_launch.extract_launch_intent("Open Word")
+        self.assertEqual(app, "Word")
+
+    def test_strips_trailing_app_word(self):
+        app, _ = self.app_launch.extract_launch_intent("open word app")
+        self.assertEqual(app, "word")
+
+    def test_strips_trailing_application_word(self):
+        app, _ = self.app_launch.extract_launch_intent("launch chrome application")
+        self.assertEqual(app, "chrome")
+
+    def test_strips_trailing_punctuation(self):
+        app, _ = self.app_launch.extract_launch_intent("open word.")
+        self.assertEqual(app, "word")
+
+    def test_accepts_two_word_app_name(self):
+        app, _ = self.app_launch.extract_launch_intent("open command prompt")
+        self.assertEqual(app, "command prompt")
+
+    def test_ignores_non_launch_utterance(self):
+        app, _ = self.app_launch.extract_launch_intent("hello world")
+        self.assertIsNone(app)
+
+    def test_ignores_launch_word_not_at_start(self):
+        app, _ = self.app_launch.extract_launch_intent("please open word")
+        self.assertIsNone(app)
+
+    def test_ignores_empty_text(self):
+        app, _ = self.app_launch.extract_launch_intent("")
+        self.assertIsNone(app)
+
+    def test_ignores_bare_verb_with_no_app(self):
+        app, _ = self.app_launch.extract_launch_intent("open")
+        self.assertIsNone(app)
+
+
+class TestAppLaunchResolve(unittest.TestCase):
+    def setUp(self):
+        import app_launch
+        self.app_launch = app_launch
+
+    def test_exact_alias_resolves_to_exe_on_path(self):
+        fake_aliases = {"word": ["winword.exe"]}
+        with patch.object(self.app_launch, "_load_app_aliases", return_value=fake_aliases), \
+             patch.object(self.app_launch.shutil, "which", return_value=r"C:\fake\winword.exe"):
+            resolved = self.app_launch.resolve_app("word")
+        self.assertEqual(resolved, r"C:\fake\winword.exe")
+
+    def test_alias_falls_back_to_literal_when_not_on_path(self):
+        fake_aliases = {"word": ["winword.exe"]}
+        with patch.object(self.app_launch, "_load_app_aliases", return_value=fake_aliases), \
+             patch.object(self.app_launch.shutil, "which", return_value=None):
+            resolved = self.app_launch.resolve_app("word")
+        self.assertEqual(resolved, "winword.exe")
+
+    def test_fuzzy_match_catches_typo(self):
+        fake_aliases = {"powershell": ["pwsh.exe"]}
+        with patch.object(self.app_launch, "_load_app_aliases", return_value=fake_aliases), \
+             patch.object(self.app_launch.shutil, "which", return_value=r"C:\pwsh.exe"):
+            resolved = self.app_launch.resolve_app("powershel")
+        self.assertEqual(resolved, r"C:\pwsh.exe")
+
+    def test_unknown_app_falls_through_to_path_lookup(self):
+        fake_aliases = {}
+
+        def fake_which(name):
+            return r"C:\mystery.exe" if name == "mystery.exe" else None
+
+        with patch.object(self.app_launch, "_load_app_aliases", return_value=fake_aliases), \
+             patch.object(self.app_launch.shutil, "which", side_effect=fake_which):
+            resolved = self.app_launch.resolve_app("mystery")
+        self.assertEqual(resolved, r"C:\mystery.exe")
+
+    def test_no_match_returns_none(self):
+        with patch.object(self.app_launch, "_load_app_aliases", return_value={}), \
+             patch.object(self.app_launch.shutil, "which", return_value=None):
+            resolved = self.app_launch.resolve_app("xyzzy")
+        self.assertIsNone(resolved)
+
+    def test_malformed_apps_json_returns_empty_map(self):
+        with patch("builtins.open", side_effect=ValueError("bad json")):
+            aliases = self.app_launch._load_app_aliases()
+        self.assertEqual(aliases, {})
+
+
+class TestAppLaunchDispatch(unittest.TestCase):
+    def setUp(self):
+        import app_launch
+        self.app_launch = app_launch
+
+    def test_launch_returns_true_on_success(self):
+        with patch.object(self.app_launch, "resolve_app", return_value=r"C:\word.exe"), \
+             patch.object(self.app_launch.os, "startfile") as startfile:
+            ok, resolved = self.app_launch.launch_app("word")
+        self.assertTrue(ok)
+        self.assertEqual(resolved, r"C:\word.exe")
+        startfile.assert_called_once_with(r"C:\word.exe")
+
+    def test_launch_returns_false_when_resolve_fails(self):
+        with patch.object(self.app_launch, "resolve_app", return_value=None):
+            ok, resolved = self.app_launch.launch_app("xyzzy")
+        self.assertFalse(ok)
+        self.assertEqual(resolved, "xyzzy")
+
+    def test_launch_returns_false_when_startfile_raises(self):
+        with patch.object(self.app_launch, "resolve_app", return_value=r"C:\broken.exe"), \
+             patch.object(self.app_launch.os, "startfile", side_effect=OSError("boom")):
+            ok, _ = self.app_launch.launch_app("broken")
+        self.assertFalse(ok)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1,0 +1,21 @@
+{
+  "word": ["winword.exe"],
+  "excel": ["excel.exe"],
+  "powerpoint": ["powerpnt.exe"],
+  "outlook": ["outlook.exe"],
+  "notepad": ["notepad.exe"],
+  "powershell": ["pwsh.exe", "powershell.exe"],
+  "cmd": ["cmd.exe"],
+  "command prompt": ["cmd.exe"],
+  "terminal": ["wt.exe", "pwsh.exe", "cmd.exe"],
+  "chrome": ["chrome.exe"],
+  "firefox": ["firefox.exe"],
+  "edge": ["msedge.exe"],
+  "explorer": ["explorer.exe"],
+  "file explorer": ["explorer.exe"],
+  "calculator": ["calc.exe"],
+  "calc": ["calc.exe"],
+  "vscode": ["code.exe"],
+  "code": ["code.exe"],
+  "claude": ["claude.exe"]
+}

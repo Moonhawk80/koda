@@ -45,6 +45,7 @@ from profiles import ProfileMonitor, get_active_window_info
 from formula_mode import convert_to_formula, is_formula_app, execute_excel_action
 from terminal_mode import is_terminal_app, normalize_for_terminal
 from voice_commands import extract_and_execute_commands
+from app_launch import extract_launch_intent, launch_app
 from stats import init_stats_db as init_stats, log_transcription_stats, log_command_stats
 from plugin_manager import PluginManager
 from prompt_assist import refine_prompt
@@ -870,6 +871,24 @@ def _transcribe_and_paste():
 
         if processed:
             duration = time.time() - rec_start
+
+            # App-launch intent runs first — "open word" should never fall through
+            # to voice_commands, and must not get pasted as text.
+            if config.get("app_launch_enabled", True):
+                app_token, _ = extract_launch_intent(processed)
+                if app_token:
+                    ok, resolved = launch_app(app_token)
+                    if ok:
+                        play_success_sound()
+                    else:
+                        play_error_sound()
+                        error_notify(f"Couldn't launch {app_token!r}. Edit apps.json to add it.")
+                    try:
+                        save_transcription(f"[launch: {app_token} -> {resolved}]", recording_mode, duration)
+                    except Exception:
+                        pass
+                    update_tray("#2ecc71", "Koda: Ready")
+                    return
 
             # Check for voice editing commands (e.g. "select all", "undo")
             deferred_cmd = None

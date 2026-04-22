@@ -65,6 +65,7 @@ DEFAULT_CONFIG = {
     "overlay_enabled": False,
     "profiles_enabled": True,
     "voice_commands": True,
+    "app_launch_enabled": True,  # "open word" / "launch chrome" / "start powershell"
     "snippets": {},
     "translation": {
         "enabled": False,
