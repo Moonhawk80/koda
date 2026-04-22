@@ -23,3 +23,17 @@ Push-to-talk voice-to-text Windows system tray app. Personal productivity tool f
 
 ## Current Status
 See memory file for session-by-session state: `C:\Users\alexi\.claude\projects\C--Users-alexi\memory\project_koda.md`
+
+## Pre-push quality gate (required for code changes)
+
+Before opening a pull request or pushing any code change to GitHub:
+
+1. Run `/forge-deslop` on the diff. Approve the hygiene fixes it proposes.
+2. Run `/forge-review` on the diff. Resolve any BLOCKING or NEEDS-FIX findings.
+3. Only then push.
+
+**Scope:** applies to pushes that touch code (source files, migrations, config, package manifests). Docs-only, README-only, brand-file-only, or `.claude/next.md`-only pushes are exempt.
+
+**Order matters:** deslop first (may modify code), then review (validates the cleaned result). Reversing the order invalidates the review.
+
+**Requires Skill Forge installed.** See `~/Projects/afg-hq/CLAUDE.md` for install instructions.
