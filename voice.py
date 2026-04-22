@@ -47,7 +47,18 @@ _PRIORITY_CLASSES = {
 
 
 def set_process_priority(level):
-    """Raise Windows scheduling priority class; no-op on non-Windows or unknown level."""
+    """Raise the current process's Windows scheduling priority class.
+
+    Under system load (many Node/Electron sessions, background builds, etc.)
+    the default NORMAL_PRIORITY_CLASS causes Koda to round-robin with every
+    other CPU-hungry process — Whisper transcription stalls for tens of
+    seconds. ABOVE_NORMAL lets Windows preempt other normal-priority processes
+    when Koda has work without starving the rest of the desktop. HIGH is more
+    aggressive; never use REALTIME.
+
+    No-op on non-Windows platforms. Unknown levels log a warning and fall
+    through to NORMAL so the app still starts cleanly.
+    """
     if sys.platform != "win32":
         return
     flag = _PRIORITY_CLASSES.get(level)
