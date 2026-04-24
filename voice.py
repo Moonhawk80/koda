@@ -676,14 +676,94 @@ def audio_callback(indata, frames, time_info, status):
         logger.warning("Audio stream status: %s", status)
     if recording:
         audio_chunks.append(indata.copy())
-    # Always feed wake word buffer (when not recording)
-    if wake_word_active and not recording:
+    if _slot_recording:
+        _slot_chunks.append(indata.copy())
+    # Always feed wake word buffer (when not recording or slot-capturing)
+    if wake_word_active and not recording and not _slot_recording:
         with wake_buffer_lock:
             wake_buffer.append(indata.copy())
             # Keep only last 3 seconds (16000 samples/sec, ~31 chunks/sec at 512 samples)
             max_chunks = int(3 * 16000 / frames) if frames > 0 else 100
             while len(wake_buffer) > max_chunks:
                 wake_buffer.pop(0)
+
+
+# ============================================================
+# Slot recording — synchronous, VAD-stopped capture for prompt-assist v2.
+# Coexists with `recording` (dictation/command). audio_callback feeds both.
+# ============================================================
+
+_slot_recording = False
+_slot_chunks = []
+
+
+def slot_record(slot_name, config_dict, max_seconds=15.0, silence_seconds=None):
+    """Record one conversational slot until VAD silence or max timeout, then transcribe.
+
+    Synchronous — blocks until done. Designed for prompt_conversation.run_conversation()
+    which runs in its own daemon thread. Returns transcribed text (possibly empty).
+    """
+    global _slot_recording, _slot_chunks
+    if silence_seconds is None:
+        silence_seconds = config_dict.get("vad", {}).get("silence_timeout_ms", 1500) / 1000.0
+
+    if model is None:
+        logger.warning("slot_record: whisper model not loaded; returning empty")
+        return ""
+    if stream is None or not stream.active:
+        logger.warning("slot_record: audio stream not available; returning empty")
+        return ""
+
+    _slot_chunks = []
+    _slot_recording = True
+    play_start_sound()  # audio cue per design §"Design principles"
+
+    try:
+        start = time.time()
+        last_voice = time.time()
+        VAD_RMS_THRESHOLD = 0.005  # tuned for typical mic gain
+        MIN_AUDIO_S = 0.5
+
+        while True:
+            if time.time() - start > max_seconds:
+                logger.info("slot_record(%s): hit max_seconds=%s", slot_name, max_seconds)
+                break
+            time.sleep(0.08)
+            if _slot_chunks:
+                recent = _slot_chunks[-6:] if len(_slot_chunks) >= 6 else _slot_chunks
+                try:
+                    arr = np.concatenate(recent, axis=0).flatten()
+                    rms = float(np.sqrt(np.mean(arr * arr)))
+                    if rms > VAD_RMS_THRESHOLD:
+                        last_voice = time.time()
+                except Exception:
+                    pass
+            if (time.time() - last_voice) >= silence_seconds and (time.time() - start) >= MIN_AUDIO_S:
+                logger.info("slot_record(%s): VAD silence stop", slot_name)
+                break
+    finally:
+        _slot_recording = False
+        chunks = _slot_chunks
+        _slot_chunks = []
+
+    if not chunks:
+        return ""
+    audio = np.concatenate(chunks, axis=0).flatten()
+    if len(audio) < int(16000 * MIN_AUDIO_S):
+        return ""
+
+    try:
+        kwargs = {"beam_size": 1, "vad_filter": False}
+        lang = config_dict.get("language", "en")
+        if lang and lang != "auto":
+            kwargs["language"] = lang
+        segments, _ = model.transcribe(audio, **kwargs)
+        text = " ".join(seg.text for seg in segments).strip()
+        logger.info("slot_record(%s): transcribed %d chars", slot_name, len(text))
+        return text
+    except Exception as e:
+        logger.error("slot_record transcribe failed: %s", e, exc_info=True)
+        return ""
 
 
 streaming_text = ""  # Latest partial transcription
@@ -1054,8 +1134,16 @@ TTS_SPEED_MAP = {
 
 
 def init_tts():
-    """Placeholder — TTS is initialized lazily on first use to avoid COM threading issues."""
-    pass
+    """Warm-start TTS in a background thread so the first hotkey press doesn't
+    pay the ~300-800ms cold-start cost. Safe to fail — _get_tts() will retry
+    lazily on first real use."""
+    def _warm():
+        try:
+            _get_tts()
+            logger.info("TTS engine warmed")
+        except Exception as e:
+            logger.warning("TTS warm-start failed (will retry on use): %s", e)
+    threading.Thread(target=_warm, daemon=True).start()
 
 
 def _get_tts():
@@ -1228,12 +1316,19 @@ def _hotkey_event_thread():
                 else:
                     start_recording("command")
             elif event == "prompt_press":
-                start_recording("prompt")
+                if config.get("prompt_assist", {}).get("conversational", True):
+                    from prompt_conversation import run_conversation
+                    threading.Thread(target=run_conversation, args=(config,), daemon=True).start()
+                else:
+                    start_recording("prompt")
             elif event == "prompt_release":
                 if recording:
                     threading.Thread(target=stop_recording, daemon=True).start()
             elif event == "prompt_toggle":
-                if recording:
+                if config.get("prompt_assist", {}).get("conversational", True):
+                    from prompt_conversation import run_conversation
+                    threading.Thread(target=run_conversation, args=(config,), daemon=True).start()
+                elif recording:
                     threading.Thread(target=stop_recording, daemon=True).start()
                 else:
                     start_recording("prompt")

@@ -3,13 +3,19 @@ Koda Floating Status Overlay — branded K icon floating on desktop.
 
 Same branded icon as the tray (dark square, white K, colored dot),
 displayed as a draggable floating widget. Right-click to hide.
+
+Also hosts show_prompt_preview() — the larger window the prompt-assist v2
+flow uses to confirm an assembled prompt before paste.
 """
 
 import ctypes
 import ctypes.wintypes
+import logging
 import tkinter as tk
 from PIL import ImageTk
 import threading
+
+logger = logging.getLogger("koda")
 
 
 def _is_on_screen(x, y, size):
@@ -184,3 +190,126 @@ class KodaOverlay:
     @property
     def is_visible(self):
         return self._visible
+
+
+# ============================================================
+# Prompt-assist v2 — confirmation preview window
+# ============================================================
+
+def show_prompt_preview(text, callbacks):
+    """Open a topmost preview window showing the assembled prompt + 4 actions.
+
+    Args:
+        text: assembled prompt to display.
+        callbacks: dict with keys 'on_confirm', 'on_refine', 'on_add',
+                   'on_cancel'. Exactly one fires; the window then closes.
+
+    Spawns its own thread + Tk root. Returns immediately.
+    """
+    def _run():
+        decided = {"v": False}
+        root_holder = {"r": None}
+
+        def _fire(key, *args):
+            if decided["v"]:
+                return
+            decided["v"] = True
+            try:
+                cb = callbacks.get(key)
+                if cb:
+                    cb(*args)
+            except Exception as e:
+                logger.error("prompt_preview callback %s failed: %s", key, e, exc_info=True)
+            try:
+                if root_holder["r"]:
+                    root_holder["r"].destroy()
+            except Exception:
+                pass
+
+        root = tk.Tk()
+        root_holder["r"] = root
+        root.title("Koda - Prompt Preview")
+        root.attributes("-topmost", True)
+        BG, FG, BTN_BG = "#1e1e1e", "#e8e8e8", "#2a2a2a"
+        root.configure(bg=BG)
+        W, H = 680, 460
+        sw = root.winfo_screenwidth()
+        sh = root.winfo_screenheight()
+        root.geometry(f"{W}x{H}+{(sw - W) // 2}+{(sh - H) // 2}")
+
+        body = tk.Frame(root, bg=BG)
+        body.pack(fill="both", expand=True, padx=14, pady=(14, 8))
+        txt = tk.Text(
+            body, wrap="word", bg=BG, fg=FG, bd=0, highlightthickness=0,
+            font=("Consolas", 11), padx=10, pady=10,
+            insertbackground=FG, selectbackground="#264f78",
+        )
+        txt.insert("1.0", text or "")
+        txt.config(state="disabled")
+        scroll = tk.Scrollbar(body, command=txt.yview, bg=BG)
+        txt.config(yscrollcommand=scroll.set)
+        txt.pack(side="left", fill="both", expand=True)
+        scroll.pack(side="right", fill="y")
+
+        btn_row = tk.Frame(root, bg=BG)
+        btn_row.pack(fill="x", padx=14, pady=(0, 14))
+
+        add_holder = {"frame": None}
+
+        def _show_add_inline():
+            if add_holder["frame"]:
+                return
+            af = tk.Frame(root, bg=BG)
+            af.pack(fill="x", padx=14, pady=(0, 14))
+            tk.Label(af, text="Append:", bg=BG, fg=FG, font=("Segoe UI", 10)).pack(side="left", padx=(0, 8))
+            entry = tk.Entry(af, bg=BTN_BG, fg=FG, insertbackground=FG, bd=0,
+                             font=("Segoe UI", 10), relief="flat")
+            entry.pack(side="left", fill="x", expand=True, ipady=4)
+            entry.focus_set()
+            def _confirm_add(_=None):
+                _fire("on_add", entry.get().strip())
+            entry.bind("<Return>", _confirm_add)
+            entry.bind("<Escape>", lambda e: _fire("on_cancel"))
+            tk.Button(af, text="OK", command=_confirm_add, bg=BTN_BG, fg="#2ecc71",
+                      bd=0, padx=12, pady=4, font=("Segoe UI", 10, "bold"),
+                      activebackground="#3a3a3a", cursor="hand2").pack(side="left", padx=(8, 0))
+            add_holder["frame"] = af
+
+        for label, accent, action in [
+            ("Send",   "#2ecc71", lambda: _fire("on_confirm")),
+            ("Refine", "#3498db", lambda: _fire("on_refine")),
+            ("Add",    "#f39c12", _show_add_inline),
+            ("Cancel", "#e74c3c", lambda: _fire("on_cancel")),
+        ]:
+            tk.Button(
+                btn_row, text=label, command=action,
+                bg=BTN_BG, fg=accent, bd=0, padx=18, pady=8,
+                activebackground="#3a3a3a", activeforeground=accent,
+                font=("Segoe UI", 10, "bold"), cursor="hand2",
+            ).pack(side="left", padx=4)
+
+        root.bind("<Escape>", lambda e: _fire("on_cancel"))
+        root.bind("<Return>", lambda e: _fire("on_confirm"))
+        root.protocol("WM_DELETE_WINDOW", lambda: _fire("on_cancel"))
+
+        root.lift()
+        try:
+            root.focus_force()
+        except Exception:
+            pass
+
+        try:
+            root.mainloop()
+        except Exception as e:
+            logger.error("prompt_preview mainloop crashed: %s", e, exc_info=True)
+        finally:
+            if not decided["v"]:
+                # Window closed without firing — treat as cancel
+                try:
+                    cb = callbacks.get("on_cancel")
+                    if cb:
+                        cb()
+                except Exception:
+                    pass
+
+    threading.Thread(target=_run, daemon=True).start()
