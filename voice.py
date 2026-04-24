@@ -697,11 +697,15 @@ _slot_recording = False
 _slot_chunks = []
 
 
-def slot_record(slot_name, config_dict, max_seconds=15.0, silence_seconds=None):
+def slot_record(slot_name, config_dict, max_seconds=15.0, silence_seconds=None, cancel_event=None):
     """Record one conversational slot until VAD silence or max timeout, then transcribe.
 
     Synchronous — blocks until done. Designed for prompt_conversation.run_conversation()
     which runs in its own daemon thread. Returns transcribed text (possibly empty).
+
+    If cancel_event is provided and set during the poll loop, the recording stops
+    early and returns "" — used by the voice-confirm listener to stop promptly
+    when a button press has already committed a decision.
     """
     global _slot_recording, _slot_chunks
     if silence_seconds is None:
@@ -718,6 +722,7 @@ def slot_record(slot_name, config_dict, max_seconds=15.0, silence_seconds=None):
     _slot_recording = True
     play_start_sound()  # audio cue per design §"Design principles"
 
+    cancelled = False
     try:
         start = time.time()
         last_voice = time.time()
@@ -725,6 +730,10 @@ def slot_record(slot_name, config_dict, max_seconds=15.0, silence_seconds=None):
         MIN_AUDIO_S = 0.5
 
         while True:
+            if cancel_event is not None and cancel_event.is_set():
+                logger.info("slot_record(%s): cancelled via event", slot_name)
+                cancelled = True
+                break
             if time.time() - start > max_seconds:
                 logger.info("slot_record(%s): hit max_seconds=%s", slot_name, max_seconds)
                 break
@@ -745,6 +754,9 @@ def slot_record(slot_name, config_dict, max_seconds=15.0, silence_seconds=None):
         _slot_recording = False
         chunks = _slot_chunks
         _slot_chunks = []
+
+    if cancelled:
+        return ""
 
     if not chunks:
         return ""

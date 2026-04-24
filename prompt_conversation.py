@@ -189,6 +189,22 @@ def _default_paste(text: str) -> None:
         logger.error("Paste failed: %s", e, exc_info=True)
 
 
+def _default_record_confirm_voice(config, *, cancel_event=None, max_seconds=6.0):
+    """Voice-confirm listener's recorder. Fast no-op when audio is unavailable
+    so tests that don't inject a fake don't pay any real cost."""
+    try:
+        import voice as v
+        if getattr(v, "model", None) is None or getattr(v, "stream", None) is None:
+            return ""
+        return v.slot_record(
+            "confirm", config,
+            max_seconds=max_seconds, cancel_event=cancel_event,
+        )
+    except Exception as e:
+        logger.debug("confirm voice record: %s", e)
+        return ""
+
+
 # ============================================================
 # State machine entry point
 # ============================================================
@@ -198,6 +214,7 @@ def run_conversation(
     *,
     tts_speak: Optional[Callable[[str], None]] = None,
     record_slot: Optional[Callable[[str, dict], str]] = None,
+    record_confirm_voice: Optional[Callable[..., str]] = None,
     show_preview: Optional[Callable[[str, dict], None]] = None,
     paste_text: Optional[Callable[[str], None]] = None,
 ) -> dict:
@@ -209,6 +226,7 @@ def run_conversation(
     """
     speak = tts_speak or _default_tts_speak
     record = record_slot or _default_record_slot
+    record_voice_confirm = record_confirm_voice or _default_record_confirm_voice
     preview = show_preview or _default_show_preview
     paste = paste_text or _default_paste
 
@@ -275,21 +293,26 @@ def run_conversation(
 
     decision = {"kind": None, "payload": ""}
     decision_event = threading.Event()
+    voice_cancel_event = threading.Event()
 
     def _on_confirm():
+        voice_cancel_event.set()
         decision["kind"] = "send"
         decision_event.set()
 
     def _on_refine():
+        voice_cancel_event.set()
         decision["kind"] = "refine"
         decision_event.set()
 
     def _on_add(text: str = ""):
+        voice_cancel_event.set()
         decision["kind"] = "add"
         decision["payload"] = text or ""
         decision_event.set()
 
     def _on_cancel():
+        voice_cancel_event.set()
         decision["kind"] = "cancel"
         decision_event.set()
 
@@ -300,8 +323,53 @@ def run_conversation(
         "on_cancel": _on_cancel,
     })
 
+    # Voice-driven confirmation — listens in parallel with the overlay buttons.
+    # Both input sources route through the same callbacks; whichever fires
+    # first wins (overlay's _fire() guards against a second callback via its
+    # own decided flag). Button press also sets voice_cancel_event so the
+    # listener stops recording immediately instead of waiting for VAD silence.
+    def _voice_listener():
+        attempts = 0
+        while attempts < 3 and not decision_event.is_set() and not voice_cancel_event.is_set():
+            heard = record_voice_confirm(
+                config, cancel_event=voice_cancel_event, max_seconds=6.0,
+            )
+            if voice_cancel_event.is_set() or decision_event.is_set():
+                return
+            if not heard:
+                attempts += 1
+                continue
+            kind, payload = classify_confirm_response(heard)
+            if kind == "unknown":
+                attempts += 1
+                continue
+            if kind == "explain":
+                # Speak the full prompt, then loop to listen again.
+                speak(assembled)
+                attempts += 1
+                continue
+            if kind == "send":
+                _on_confirm()
+            elif kind == "refine":
+                _on_refine()
+            elif kind == "add":
+                _on_add(payload)
+            elif kind == "cancel":
+                _on_cancel()
+            return
+
+    voice_thread = threading.Thread(target=_voice_listener, daemon=True)
+    voice_thread.start()
+
     if not decision_event.wait(timeout=CONFIRM_TIMEOUT_S):
+        voice_cancel_event.set()
+        voice_thread.join(timeout=0.3)
         return _cancel(f"no decision within {CONFIRM_TIMEOUT_S}s")
+
+    # Main thread won; make sure voice listener exits promptly before we return
+    # so tests and callers observe a fully-settled state.
+    voice_cancel_event.set()
+    voice_thread.join(timeout=0.3)
 
     if decision["kind"] == "cancel":
         return _cancel("user cancelled at confirm")

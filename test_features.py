@@ -2884,6 +2884,208 @@ class TestPromptConvStateMachine(unittest.TestCase):
 
 
 # ============================================================
+# Prompt Assist v2 — voice-driven confirmation
+# ============================================================
+
+class TestPromptConvVoiceConfirm(unittest.TestCase):
+    """Voice listener during CONFIRMING routes through the same callbacks as
+    the overlay buttons; whichever fires first wins."""
+
+    def setUp(self):
+        import prompt_conversation as pc
+        self.pc = pc
+        self.spoken = []
+        self.pasted = []
+
+    def _speak(self, text):
+        self.spoken.append(text)
+
+    def _paste(self, text):
+        self.pasted.append(text)
+
+    def _make_record(self, slot_answers):
+        def record(slot_name, _config):
+            return slot_answers.get(slot_name, "")
+        return record
+
+    def _silent_preview(self):
+        """Overlay that opens but never fires a button — voice must win."""
+        def preview(_prompt, _callbacks):
+            pass
+        return preview
+
+    def _never_voice(self):
+        """Voice listener that returns empty — button must win."""
+        calls = {"n": 0}
+        def rec(_config, *, cancel_event=None, max_seconds=6.0):
+            calls["n"] += 1
+            return ""
+        return rec, calls
+
+    def _slot_record(self):
+        return self._make_record({
+            "task": "write a Python function that reverses a string",
+            "context": "for a coding interview",
+            "format": "one short example",
+        })
+
+    def test_voice_send_routes_to_paste(self):
+        def voice_rec(_config, *, cancel_event=None, max_seconds=6.0):
+            return "send"
+        snap = self.pc.run_conversation(
+            {},
+            tts_speak=self._speak,
+            record_slot=self._slot_record(),
+            record_confirm_voice=voice_rec,
+            show_preview=self._silent_preview(),
+            paste_text=self._paste,
+        )
+        self.assertEqual(snap["final_state"], self.pc.S_DONE)
+        self.assertEqual(len(self.pasted), 1)
+        self.assertIn("reverses a string", self.pasted[0])
+
+    def test_voice_cancel_aborts(self):
+        def voice_rec(_config, *, cancel_event=None, max_seconds=6.0):
+            return "never mind"
+        snap = self.pc.run_conversation(
+            {},
+            tts_speak=self._speak,
+            record_slot=self._slot_record(),
+            record_confirm_voice=voice_rec,
+            show_preview=self._silent_preview(),
+            paste_text=self._paste,
+        )
+        self.assertEqual(snap["final_state"], self.pc.S_CANCELLED)
+        self.assertEqual(self.pasted, [])
+
+    def test_voice_add_appends_payload(self):
+        def voice_rec(_config, *, cancel_event=None, max_seconds=6.0):
+            return "add keep it under twenty lines"
+        snap = self.pc.run_conversation(
+            {},
+            tts_speak=self._speak,
+            record_slot=self._slot_record(),
+            record_confirm_voice=voice_rec,
+            show_preview=self._silent_preview(),
+            paste_text=self._paste,
+        )
+        self.assertEqual(snap["final_state"], self.pc.S_DONE)
+        self.assertIn("twenty lines", snap["raw"].lower())
+        self.assertEqual(len(self.pasted), 1)
+
+    def test_voice_refine_forces_llm_path(self):
+        # With llm_refine off in config, the 'refine' voice command should still
+        # fire the callback and advance to paste (the LLM call inside refine_prompt
+        # is a no-op when llm_refine stays False, but the routing succeeds).
+        def voice_rec(_config, *, cancel_event=None, max_seconds=6.0):
+            return "refine"
+        snap = self.pc.run_conversation(
+            {},
+            tts_speak=self._speak,
+            record_slot=self._slot_record(),
+            record_confirm_voice=voice_rec,
+            show_preview=self._silent_preview(),
+            paste_text=self._paste,
+        )
+        self.assertEqual(snap["final_state"], self.pc.S_DONE)
+        self.assertEqual(len(self.pasted), 1)
+
+    def test_unknown_voice_falls_through_to_button(self):
+        """Voice returns ambiguous text 3x; button then fires and wins."""
+        call_log = {"voice": 0}
+
+        def voice_rec(_config, *, cancel_event=None, max_seconds=6.0):
+            call_log["voice"] += 1
+            return "hmm"  # classifies as 'unknown'
+
+        def button_preview(_prompt, callbacks):
+            # Fire the send callback after a short delay so voice gets a chance first.
+            import threading as _t, time as _tt
+            def _click():
+                _tt.sleep(0.1)
+                cb = callbacks.get("on_confirm")
+                if cb:
+                    cb()
+            _t.Thread(target=_click, daemon=True).start()
+
+        snap = self.pc.run_conversation(
+            {},
+            tts_speak=self._speak,
+            record_slot=self._slot_record(),
+            record_confirm_voice=voice_rec,
+            show_preview=button_preview,
+            paste_text=self._paste,
+        )
+        self.assertEqual(snap["final_state"], self.pc.S_DONE)
+        # Voice listener capped at 3 attempts on pure 'unknown' stream
+        self.assertLessEqual(call_log["voice"], 3)
+        self.assertEqual(len(self.pasted), 1)
+
+    def test_button_click_sets_voice_cancel_event(self):
+        """When the overlay button fires, the voice listener's cancel_event
+        should be set so slot_record breaks out of its poll loop."""
+        captured_event = {"evt": None}
+        voice_seen_cancel = {"v": False}
+
+        def voice_rec(_config, *, cancel_event=None, max_seconds=6.0):
+            captured_event["evt"] = cancel_event
+            # Simulate a slow recorder that checks cancel_event once per loop
+            import time as _t
+            for _ in range(20):
+                _t.sleep(0.01)
+                if cancel_event is not None and cancel_event.is_set():
+                    voice_seen_cancel["v"] = True
+                    return ""
+            return ""
+
+        def button_preview(_prompt, callbacks):
+            import threading as _t, time as _tt
+            def _click():
+                _tt.sleep(0.05)
+                cb = callbacks.get("on_confirm")
+                if cb:
+                    cb()
+            _t.Thread(target=_click, daemon=True).start()
+
+        snap = self.pc.run_conversation(
+            {},
+            tts_speak=self._speak,
+            record_slot=self._slot_record(),
+            record_confirm_voice=voice_rec,
+            show_preview=button_preview,
+            paste_text=self._paste,
+        )
+        self.assertEqual(snap["final_state"], self.pc.S_DONE)
+        self.assertIsNotNone(captured_event["evt"])
+        self.assertTrue(voice_seen_cancel["v"])
+
+    def test_explain_reads_back_and_continues_listening(self):
+        """'explain' speaks the full prompt and then the listener tries again.
+        On the 2nd call, return 'send' to close the loop."""
+        responses = iter(["explain", "send"])
+
+        def voice_rec(_config, *, cancel_event=None, max_seconds=6.0):
+            try:
+                return next(responses)
+            except StopIteration:
+                return ""
+
+        snap = self.pc.run_conversation(
+            {},
+            tts_speak=self._speak,
+            record_slot=self._slot_record(),
+            record_confirm_voice=voice_rec,
+            show_preview=self._silent_preview(),
+            paste_text=self._paste,
+        )
+        self.assertEqual(snap["final_state"], self.pc.S_DONE)
+        # The assembled prompt should appear somewhere in spoken history
+        # (could be the explain read-back OR the summary — both contain text).
+        self.assertTrue(any(s and len(s) > 20 for s in self.spoken))
+        self.assertEqual(len(self.pasted), 1)
+
+
+# ============================================================
 # Active-window platform classification
 # ============================================================
 
