@@ -1075,6 +1075,35 @@ class TestPromptAssist(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertIn("explain", result.lower())
 
+    def test_refine_backend_ollama_triggers_llm_on_send(self):
+        """refine_backend=ollama must fire _llm_refine on the Send path even
+        when llm_refine is not set. Regression gate for the install-time
+        default — without this, users who picked Ollama at setup got raw
+        template output and had to click Refine manually."""
+        from prompt_assist import refine_prompt
+        config = {"prompt_assist": {"refine_backend": "ollama"}}
+        with patch("prompt_assist._llm_refine", return_value="POLISHED") as m:
+            result = refine_prompt("build a website for boca tanning club", config)
+        self.assertTrue(m.called, "refine_backend=ollama must trigger LLM refinement")
+        self.assertEqual(result, "POLISHED")
+
+    def test_refine_backend_api_triggers_llm_on_send(self):
+        """refine_backend=api behaves the same as ollama for the gate."""
+        from prompt_assist import refine_prompt
+        config = {"prompt_assist": {"refine_backend": "api"}}
+        with patch("prompt_assist._llm_refine", return_value="API_POLISHED") as m:
+            result = refine_prompt("write an email to the team", config)
+        self.assertTrue(m.called, "refine_backend=api must trigger LLM refinement")
+        self.assertEqual(result, "API_POLISHED")
+
+    def test_refine_backend_none_skips_llm(self):
+        """refine_backend=none must NOT fire _llm_refine — template-only path."""
+        from prompt_assist import refine_prompt
+        config = {"prompt_assist": {"refine_backend": "none"}}
+        with patch("prompt_assist._llm_refine") as m:
+            refine_prompt("explain python decorators", config)
+        self.assertFalse(m.called, "refine_backend=none must skip LLM refinement")
+
 
 # ============================================================
 # Custom Vocabulary Pipeline Wiring
