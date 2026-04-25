@@ -16,6 +16,8 @@ koda_stats.db
 .claude/*
 !.claude/next.md
 .forge-clean/
+.forge-deslop/
+.forge-review/
 .forge-test/
 .deslop/
 .deep-review/

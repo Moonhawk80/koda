@@ -676,14 +676,154 @@ def audio_callback(indata, frames, time_info, status):
         logger.warning("Audio stream status: %s", status)
     if recording:
         audio_chunks.append(indata.copy())
-    # Always feed wake word buffer (when not recording)
-    if wake_word_active and not recording:
+    if _slot_recording:
+        _slot_chunks.append(indata.copy())
+    # Always feed wake word buffer (when not recording or slot-capturing)
+    if wake_word_active and not recording and not _slot_recording:
         with wake_buffer_lock:
             wake_buffer.append(indata.copy())
             # Keep only last 3 seconds (16000 samples/sec, ~31 chunks/sec at 512 samples)
             max_chunks = int(3 * 16000 / frames) if frames > 0 else 100
             while len(wake_buffer) > max_chunks:
                 wake_buffer.pop(0)
+
+
+# ============================================================
+# Slot recording — synchronous, VAD-stopped capture for prompt-assist v2.
+# Coexists with `recording` (dictation/command). audio_callback feeds both.
+# ============================================================
+
+_slot_recording = False
+_slot_chunks = []
+
+
+def slot_record(slot_name, config_dict, max_seconds=15.0, silence_seconds=None, cancel_event=None):
+    """Record one conversational slot until VAD silence or max timeout, then transcribe.
+
+    Synchronous — blocks until done. Designed for prompt_conversation.run_conversation()
+    which runs in its own daemon thread. Returns transcribed text (possibly empty).
+
+    If cancel_event is provided and set during the poll loop, the recording stops
+    early and returns "" — used by the voice-confirm listener to stop promptly
+    when a button press has already committed a decision.
+    """
+    global _slot_recording, _slot_chunks, model, stream
+    if silence_seconds is None:
+        silence_seconds = config_dict.get("vad", {}).get("silence_timeout_ms", 1500) / 1000.0
+
+    # Cross-module bridge: when voice.py runs as __main__ (via start.bat or
+    # PyInstaller onefile) but another module imports us via `from voice
+    # import ...`, the importing side gets a separate `voice` module with
+    # its own globals. audio_callback is registered by __main__ and writes
+    # to __main__'s `_slot_recording` / `_slot_chunks` / `recording` /
+    # `audio_chunks` / `model` / `stream`. We route state through __main__
+    # when that's the case so audio buffers actually reach this function.
+    import sys
+    _my_name = __name__
+    _main = sys.modules.get("__main__")
+    bridge = _main if (_main is not None and _main is not sys.modules.get(_my_name)) else None
+
+    # Reach across for the loaded Whisper model + audio stream if our view is empty.
+    if bridge is not None:
+        if model is None:
+            cand = getattr(bridge, "model", None)
+            if cand is not None:
+                model = cand
+        if stream is None:
+            cand = getattr(bridge, "stream", None)
+            if cand is not None:
+                stream = cand
+
+    if model is None:
+        logger.warning("slot_record: whisper model not loaded; returning empty")
+        return ""
+    if stream is None or not stream.active:
+        logger.warning("slot_record: audio stream not available; returning empty")
+        return ""
+
+    # Point _slot_recording / _slot_chunks at the module that audio_callback
+    # actually writes to. If bridging, we flip the __main__ flags and read
+    # chunks from __main__'s list; our own module's copies stay in sync for
+    # any local readers.
+    def _set_recording(flag):
+        global _slot_recording
+        _slot_recording = flag
+        if bridge is not None:
+            bridge._slot_recording = flag
+
+    def _get_chunks():
+        return bridge._slot_chunks if bridge is not None else _slot_chunks
+
+    def _reset_chunks():
+        global _slot_chunks
+        _slot_chunks = []
+        if bridge is not None:
+            bridge._slot_chunks = []
+
+    _reset_chunks()
+    _set_recording(True)
+    play_start_sound()  # audio cue per design §"Design principles"
+
+    cancelled = False
+    try:
+        start = time.time()
+        last_voice = time.time()
+        voice_detected = False  # gate silence-stop until at least one voice event
+        VAD_RMS_THRESHOLD = 0.005  # tuned for typical mic gain
+        MIN_AUDIO_S = 0.5
+
+        while True:
+            if cancel_event is not None and cancel_event.is_set():
+                logger.info("slot_record(%s): cancelled via event", slot_name)
+                cancelled = True
+                break
+            if time.time() - start > max_seconds:
+                logger.info("slot_record(%s): hit max_seconds=%s (voice_detected=%s, chunk_count=%d)",
+                            slot_name, max_seconds, voice_detected, len(_get_chunks()))
+                break
+            time.sleep(0.08)
+            current_chunks = _get_chunks()
+            if current_chunks:
+                recent = current_chunks[-6:] if len(current_chunks) >= 6 else current_chunks
+                try:
+                    arr = np.concatenate(recent, axis=0).flatten()
+                    rms = float(np.sqrt(np.mean(arr * arr)))
+                    if rms > VAD_RMS_THRESHOLD:
+                        voice_detected = True
+                        last_voice = time.time()
+                except Exception:
+                    pass
+            # Silence-stop requires BOTH: user actually spoke at some point AND
+            # silence_seconds have passed since their last voice event.
+            if voice_detected and (time.time() - last_voice) >= silence_seconds and (time.time() - start) >= MIN_AUDIO_S:
+                logger.info("slot_record(%s): VAD silence stop", slot_name)
+                break
+    finally:
+        _set_recording(False)
+        chunks = list(_get_chunks())  # snapshot before clearing
+        _reset_chunks()
+
+    if cancelled:
+        return ""
+
+    if not chunks:
+        return ""
+    audio = np.concatenate(chunks, axis=0).flatten()
+    if len(audio) < int(16000 * MIN_AUDIO_S):
+        return ""
+
+    try:
+        kwargs = {"beam_size": 1, "vad_filter": False}
+        lang = config_dict.get("language", "en")
+        if lang and lang != "auto":
+            kwargs["language"] = lang
+        segments, _ = model.transcribe(audio, **kwargs)
+        text = " ".join(seg.text for seg in segments).strip()
+        logger.info("slot_record(%s): transcribed %d chars", slot_name, len(text))
+        return text
+    except Exception as e:
+        logger.error("slot_record transcribe failed: %s", e, exc_info=True)
+        return ""
 
 
 streaming_text = ""  # Latest partial transcription
@@ -1054,8 +1194,16 @@ TTS_SPEED_MAP = {
 
 
 def init_tts():
-    """Placeholder — TTS is initialized lazily on first use to avoid COM threading issues."""
-    pass
+    """Warm-start TTS in a background thread so the first hotkey press doesn't
+    pay the ~300-800ms cold-start cost. Safe to fail — _get_tts() will retry
+    lazily on first real use."""
+    def _warm():
+        try:
+            _get_tts()
+            logger.info("TTS engine warmed")
+        except Exception as e:
+            logger.warning("TTS warm-start failed (will retry on use): %s", e)
+    threading.Thread(target=_warm, daemon=True).start()
 
 
 def _get_tts():
@@ -1228,12 +1376,19 @@ def _hotkey_event_thread():
                 else:
                     start_recording("command")
             elif event == "prompt_press":
-                start_recording("prompt")
+                if config.get("prompt_assist", {}).get("conversational", True):
+                    from prompt_conversation import run_conversation
+                    threading.Thread(target=run_conversation, args=(config,), daemon=True).start()
+                else:
+                    start_recording("prompt")
             elif event == "prompt_release":
                 if recording:
                     threading.Thread(target=stop_recording, daemon=True).start()
             elif event == "prompt_toggle":
-                if recording:
+                if config.get("prompt_assist", {}).get("conversational", True):
+                    from prompt_conversation import run_conversation
+                    threading.Thread(target=run_conversation, args=(config,), daemon=True).start()
+                elif recording:
                     threading.Thread(target=stop_recording, daemon=True).start()
                 else:
                     start_recording("prompt")

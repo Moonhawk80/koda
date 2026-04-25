@@ -68,6 +68,12 @@ DEFAULT_CONFIG = {
         "enabled": False,
         "model": "phi3:mini",
     },
+    "prompt_assist": {
+        "conversational": True,
+        "refine_backend": "none",
+        "api_provider": None,
+        "opener": "What are we working on with AI today?",
+    },
     "tts": {
         "rate": "normal",
         "voice": "",

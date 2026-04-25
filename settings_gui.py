@@ -687,6 +687,38 @@ class KodaSettings(tk.Tk):
         self.speed_var = tk.StringVar(value=self.config_data.get("tts", {}).get("rate", "normal"))
         ttk.Combobox(rf, textvariable=self.speed_var, width=30, values=["slow","normal","fast"], state="readonly").grid(row=1, column=1, sticky="w", pady=5)
 
+        self._section_header(parent, "Prompt Assist")
+        pa = self.config_data.get("prompt_assist", {})
+        # Flatten (refine_backend, api_provider) into a single dropdown choice
+        _PA_LABEL_TO_PAIR = {
+            "None — template only": ("none", None),
+            "Local Ollama": ("ollama", None),
+            "Anthropic Claude (API key)": ("api", "claude"),
+            "OpenAI (API key)": ("api", "openai"),
+        }
+        _PA_PAIR_TO_LABEL = {v: k for k, v in _PA_LABEL_TO_PAIR.items()}
+        self._pa_label_to_pair = _PA_LABEL_TO_PAIR
+        current_pair = (pa.get("refine_backend", "none"), pa.get("api_provider"))
+        current_label = _PA_PAIR_TO_LABEL.get(current_pair, "None — template only")
+
+        paf = ttk.Frame(parent); paf.pack(fill="x")
+        ttk.Label(paf, text="Polish backend").grid(row=0, column=0, sticky="w", padx=(0, 14), pady=5)
+        self.pa_backend_var = tk.StringVar(value=current_label)
+        ttk.Combobox(
+            paf, textvariable=self.pa_backend_var, width=30,
+            values=list(_PA_LABEL_TO_PAIR.keys()), state="readonly",
+        ).grid(row=0, column=1, sticky="w", pady=5)
+
+        ttk.Label(paf, text="Opener").grid(row=1, column=0, sticky="w", padx=(0, 14), pady=5)
+        self.pa_opener_var = tk.StringVar(value=pa.get("opener", "What are we working on with AI today?"))
+        ttk.Entry(paf, textvariable=self.pa_opener_var, width=40).grid(row=1, column=1, sticky="w", pady=5)
+
+        self.pa_conv_var = tk.BooleanVar(value=pa.get("conversational", True))
+        ttk.Checkbutton(parent, text="Use conversational flow  (Ctrl+F9 asks questions instead of one-shot)",
+                        variable=self.pa_conv_var).pack(anchor="w", pady=(6, 2))
+
+        ttk.Button(parent, text="Update API key…", command=self._update_prompt_api_key).pack(anchor="w", pady=(4, 0))
+
         self._section_header(parent, "Performance")
         current_compute = self.config_data.get("compute_type", "int8")
         mode_text = "Power Mode  (NVIDIA GPU)" if current_compute == "float16" else "Standard Mode  (CPU)"
@@ -748,6 +780,13 @@ class KodaSettings(tk.Tk):
         tts["voice"] = self.voice_var.get()
         tts["rate"] = self.speed_var.get()
 
+        pa = cfg.setdefault("prompt_assist", {})
+        backend, provider = self._pa_label_to_pair.get(self.pa_backend_var.get(), ("none", None))
+        pa["refine_backend"] = backend
+        pa["api_provider"] = provider
+        pa["opener"] = self.pa_opener_var.get().strip() or "What are we working on with AI today?"
+        pa["conversational"] = self.pa_conv_var.get()
+
         cfg["snippets"] = self._snippets
         save_config(cfg)
         self._save_custom_words_data()
@@ -765,6 +804,30 @@ class KodaSettings(tk.Tk):
                 + "\n".join(f"  \u2022 {k}" for k in changed),
             )
         self.destroy()
+
+    def _update_prompt_api_key(self):
+        """Prompt for an API key and store it in Windows Credential Manager."""
+        backend, provider = self._pa_label_to_pair.get(self.pa_backend_var.get(), ("none", None))
+        if backend != "api" or not provider:
+            messagebox.showinfo(
+                "Pick an API backend first",
+                "Set 'Polish backend' to Anthropic Claude or OpenAI, then update the key.",
+            )
+            return
+        from tkinter import simpledialog
+        key = simpledialog.askstring(
+            "API key",
+            f"Paste your {provider.title()} API key.\n\n"
+            "Stored in Windows Credential Manager — never written to config.json.",
+            show="*",
+        )
+        if not key:
+            return
+        from prompt_assist_credentials import save_api_key
+        if save_api_key(provider, key.strip()):
+            messagebox.showinfo("Saved", f"{provider.title()} API key updated.")
+        else:
+            messagebox.showerror("Error", "Could not save key — see debug.log.")
 
     def _open_custom_words(self):
         """Open custom_words.json in the default editor."""

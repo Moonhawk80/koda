@@ -306,6 +306,22 @@ FKEY_OPTIONS = [
     ("F9", "f9"), ("F10", "f10"), ("F11", "f11"), ("F12", "f12"),
 ]
 
+# Prompt Assist gets its own list: Ctrl+F* variants are offered first because
+# bare F9 collides with Alienware Command Center / other OEM performance-mode
+# toggles on many laptops (see commit a55a0e7). Bare F-keys remain available
+# for users on non-conflicting hardware.
+PROMPT_FKEY_OPTIONS = [
+    ("Ctrl + F9", "ctrl+f9"),
+    ("Ctrl + F8", "ctrl+f8"),
+    ("Ctrl + F10", "ctrl+f10"),
+    ("Ctrl + F11", "ctrl+f11"),
+    ("Ctrl + F12", "ctrl+f12"),
+    ("F9", "f9"),
+    ("F10", "f10"),
+    ("F11", "f11"),
+    ("F12", "f12"),
+]
+
 DICTATION_OPTIONS = [
     ("Ctrl + Space", "ctrl+space"),
     ("F8", "f8"),
@@ -335,6 +351,9 @@ def setup_hotkeys():
     print("                   can hear what was typed")
     print("    Read Selected- Highlight any text on screen and have Koda")
     print("                   read it to you\n")
+    print("  NOTE: Prompt Assist defaults to Ctrl+F9 because bare F9 collides")
+    print("        with Alienware Command Center and other OEM performance")
+    print("        toggles on many laptops.\n")
 
     # --- Dictation (main) ---
     print("  ── Dictation hotkey (your main key, used most often) ──\n")
@@ -347,16 +366,16 @@ def setup_hotkeys():
 
     # --- Customize the rest? ---
     print("  ── Other hotkeys (defaults shown) ──\n")
-    print("    F8  = Command      - Hold to talk, pastes cleaned-up text")
-    print("    F9  = Prompt Assist - Hold to talk, pastes a structured AI prompt")
-    print("    F7  = Correction   - Undo last paste and re-record")
-    print("    F6  = Read Back    - Reads last transcription aloud")
-    print("    F5  = Read Selected - Reads highlighted text aloud\n")
+    print("    F8      = Command         - Hold to talk, pastes cleaned-up text")
+    print("    Ctrl+F9 = Prompt Assist   - Hold to talk, pastes a structured AI prompt")
+    print("    F7      = Correction      - Undo last paste and re-record")
+    print("    F6      = Read Back       - Reads last transcription aloud")
+    print("    F5      = Read Selected   - Reads highlighted text aloud\n")
 
     customize = ask_yes_no("Customize these? (or keep defaults)", default=False)
 
     command = "f8"
-    prompt = "f9"
+    prompt = "ctrl+f9"
     correction = "f7"
     readback = "f6"
     readback_sel = "f5"
@@ -373,7 +392,7 @@ def setup_hotkeys():
         print("  ── Prompt Assist ──")
         print("  Hold to talk. Turns your speech into a well-structured prompt")
         print("  for ChatGPT, Claude, or any AI assistant.\n")
-        prompt = ask_choice("Prompt Assist hotkey:", FKEY_OPTIONS, default=4)  # F9
+        prompt = ask_choice("Prompt Assist hotkey:", PROMPT_FKEY_OPTIONS, default=0)  # Ctrl+F9
         print()
 
         print("  ── Correction ──")
@@ -532,13 +551,121 @@ def setup_wake_word():
 
 
 # ============================================================
-# STEP 8: LLM PROMPT POLISHING
+# STEP 9: PROMPT-ASSIST VOICE
+# ============================================================
+
+def setup_prompt_voice():
+    """Pick a TTS voice for the conversational prompt-assist flow."""
+    clear()
+    banner()
+    print("  STEP 9 of 11: PROMPT ASSIST VOICE\n")
+    print("  ─────────────────────────────────────────\n")
+    print("  Press your prompt-assist hotkey (default Ctrl+F9) and Koda")
+    print("  will speak a short question, then assemble your prompt.")
+    print("  Pick the voice you want to hear.\n")
+
+    try:
+        import pyttsx3
+        engine = pyttsx3.init()
+        voices = engine.getProperty("voices") or []
+    except Exception as e:
+        print(f"  Voice list unavailable ({e}). Using system default.\n")
+        input("  Press Enter to continue...")
+        return ""
+
+    if not voices:
+        print("  No SAPI5 voices found. Using system default.\n")
+        input("  Press Enter to continue...")
+        return ""
+
+    options = []
+    for v in voices[:6]:  # cap so the list stays scannable
+        options.append((v.name, v.name))
+
+    print("  Available voices (sample plays after you choose):\n")
+    selected_name = ask_choice(
+        "Pick a voice:", options, default=0
+    )
+
+    try:
+        for v in voices:
+            if v.name == selected_name:
+                engine.setProperty("voice", v.id)
+                break
+        engine.say("Hi, I'm Koda. What are we working on with AI today?")
+        engine.runAndWait()
+    except Exception as e:
+        print(f"  (Couldn't preview the voice: {e})\n")
+
+    print()
+    input("  Press Enter to continue...")
+    return selected_name
+
+
+# ============================================================
+# STEP 10: PROMPT-ASSIST REFINE BACKEND
+# ============================================================
+
+def setup_prompt_backend():
+    """Pick the LLM backend that polishes assembled prompts."""
+    clear()
+    banner()
+    print("  STEP 10 of 11: PROMPT POLISH BACKEND\n")
+    print("  ─────────────────────────────────────────\n")
+    print("  After Koda assembles your prompt, an optional AI step can")
+    print("  polish it for clarity. Pick how that polish happens.\n")
+    print("    1. None     — template only, zero setup, recommended")
+    print("    2. Ollama   — local model, free, ~2GB download, install separately")
+    print("    3. API key  — Claude or OpenAI, best quality, ~$0.01/prompt\n")
+
+    backend = ask_choice(
+        "Choose backend:",
+        [
+            ("None — template only", "none"),
+            ("Local Ollama", "ollama"),
+            ("Bring your own API key", "api"),
+        ],
+        default=0,
+    )
+
+    provider = None
+    if backend == "api":
+        print()
+        provider = ask_choice(
+            "Which API?",
+            [("Anthropic Claude", "claude"), ("OpenAI", "openai")],
+            default=0,
+        )
+        print()
+        print(f"  Paste your {provider.title()} API key. It's stored in the")
+        print("  Windows Credential Manager — never in config.json, never logged.\n")
+        key = input("  API key: ").strip()
+        if key:
+            from prompt_assist_credentials import save_api_key
+            if save_api_key(provider, key):
+                print("\n  Key saved.\n")
+            else:
+                print("\n  Could not save key (Credential Manager error). Falling back to None.\n")
+                backend = "none"
+                provider = None
+        else:
+            print("\n  No key entered. Falling back to None.\n")
+            backend = "none"
+            provider = None
+
+    print()
+    input("  Press Enter to continue...")
+    return backend, provider
+
+
+# ============================================================
+# STEP 11: LLM PROMPT POLISHING (legacy command-mode polish)
 # ============================================================
 
 def setup_llm():
     clear()
     banner()
-    print("  STEP 9 of 9: AI PROMPT POLISHING\n")
+    print("  STEP 11 of 11: COMMAND MODE AI POLISHING\n")
     print("  ─────────────────────────────────────────\n")
     print("  When enabled, Koda uses a local AI model (via Ollama) to")
     print("  clean up your speech into clear, concise instructions.\n")
@@ -598,6 +725,11 @@ def show_summary_and_save(config):
     print(f"    Noise reduction:  {'On' if config['noise_reduction'] else 'Off'}")
     print(f"    Wake word:        {'On (\"Hey Koda\")' if config['wake_word']['enabled'] else 'Off'}")
     print(f"    LLM polish:       {'On (' + config['llm_polish']['model'] + ')' if config['llm_polish']['enabled'] else 'Off'}")
+    pa = config.get("prompt_assist", {})
+    backend_label = {"none": "Template only", "ollama": "Local Ollama", "api": f"API ({pa.get('api_provider') or 'unset'})"}.get(pa.get("refine_backend", "none"), "Template only")
+    voice_label = config.get("tts", {}).get("voice") or "System default"
+    print(f"    Prompt voice:     {voice_label}")
+    print(f"    Prompt polish:    {backend_label}")
     print()
 
     with open(CONFIG_PATH, "w", encoding="utf-8") as f:
@@ -632,7 +764,9 @@ def main():
     language = setup_language()                     # Step 6
     sound, fillers, noise, auto_start = setup_preferences()  # Step 7
     wake_word_enabled = setup_wake_word()           # Step 8
-    llm_enabled, llm_model = setup_llm()            # Step 9
+    prompt_voice = setup_prompt_voice()             # Step 9
+    refine_backend, api_provider = setup_prompt_backend()  # Step 10
+    llm_enabled, llm_model = setup_llm()            # Step 11
 
     # Build config
     config = {
@@ -666,6 +800,16 @@ def main():
         "llm_polish": {
             "enabled": llm_enabled,
             "model": llm_model,
+        },
+        "tts": {
+            "rate": "normal",
+            "voice": prompt_voice,
+        },
+        "prompt_assist": {
+            "conversational": True,
+            "refine_backend": refine_backend,
+            "api_provider": api_provider,
+            "opener": "What are we working on with AI today?",
         },
         "_auto_start": auto_start,
     }

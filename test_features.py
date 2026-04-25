@@ -1075,6 +1075,35 @@ class TestPromptAssist(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertIn("explain", result.lower())
 
+    def test_refine_backend_ollama_triggers_llm_on_send(self):
+        """refine_backend=ollama must fire _llm_refine on the Send path even
+        when llm_refine is not set. Regression gate for the install-time
+        default — without this, users who picked Ollama at setup got raw
+        template output and had to click Refine manually."""
+        from prompt_assist import refine_prompt
+        config = {"prompt_assist": {"refine_backend": "ollama"}}
+        with patch("prompt_assist._llm_refine", return_value="POLISHED") as m:
+            result = refine_prompt("build a website for boca tanning club", config)
+        self.assertTrue(m.called, "refine_backend=ollama must trigger LLM refinement")
+        self.assertEqual(result, "POLISHED")
+
+    def test_refine_backend_api_triggers_llm_on_send(self):
+        """refine_backend=api behaves the same as ollama for the gate."""
+        from prompt_assist import refine_prompt
+        config = {"prompt_assist": {"refine_backend": "api"}}
+        with patch("prompt_assist._llm_refine", return_value="API_POLISHED") as m:
+            result = refine_prompt("write an email to the team", config)
+        self.assertTrue(m.called, "refine_backend=api must trigger LLM refinement")
+        self.assertEqual(result, "API_POLISHED")
+
+    def test_refine_backend_none_skips_llm(self):
+        """refine_backend=none must NOT fire _llm_refine — template-only path."""
+        from prompt_assist import refine_prompt
+        config = {"prompt_assist": {"refine_backend": "none"}}
+        with patch("prompt_assist._llm_refine") as m:
+            refine_prompt("explain python decorators", config)
+        self.assertFalse(m.called, "refine_backend=none must skip LLM refinement")
+
 
 # ============================================================
 # Custom Vocabulary Pipeline Wiring
@@ -2650,6 +2679,560 @@ class TestAppLaunchDispatch(unittest.TestCase):
              patch.object(self.app_launch.os, "startfile", side_effect=OSError("boom")):
             ok, _ = self.app_launch.launch_app("broken")
         self.assertFalse(ok)
+
+
+# ============================================================
+# Prompt Assist v2 — slot/confirm classifiers + short-circuit gate
+# ============================================================
+
+class TestPromptConvClassifiers(unittest.TestCase):
+    def setUp(self):
+        from prompt_conversation import classify_slot_response, classify_confirm_response
+        self.cs = classify_slot_response
+        self.cc = classify_confirm_response
+
+    def test_slot_cancel(self):
+        for word in ("cancel", "Cancel.", "never mind", "nevermind", "stop", "forget it"):
+            self.assertEqual(self.cs(word)[0], "cancel", word)
+
+    def test_slot_exit(self):
+        for word in ("go", "done", "Done.", "that's enough", "enough"):
+            self.assertEqual(self.cs(word)[0], "exit", word)
+
+    def test_slot_content_passes_through(self):
+        kind, payload = self.cs("help me write a Python script")
+        self.assertEqual(kind, "content")
+        self.assertEqual(payload, "help me write a Python script")
+
+    def test_slot_empty(self):
+        self.assertEqual(self.cs("")[0], "content")
+        self.assertEqual(self.cs("")[1], "")
+
+    def test_confirm_send(self):
+        for word in ("send", "Send", "go", "yes", "yep", "ok"):
+            self.assertEqual(self.cc(word)[0], "send", word)
+
+    def test_confirm_refine(self):
+        for word in ("refine", "polish", "improve"):
+            self.assertEqual(self.cc(word)[0], "refine", word)
+
+    def test_confirm_cancel(self):
+        self.assertEqual(self.cc("cancel")[0], "cancel")
+
+    def test_confirm_explain(self):
+        for word in ("explain", "read it back", "read"):
+            self.assertEqual(self.cc(word)[0], "explain", word)
+
+    def test_confirm_add_with_payload(self):
+        kind, payload = self.cc("add make it concise")
+        self.assertEqual(kind, "add")
+        self.assertEqual(payload, "make it concise")
+
+    def test_confirm_add_bare(self):
+        kind, payload = self.cc("add")
+        self.assertEqual(kind, "add")
+        self.assertEqual(payload, "")
+
+    def test_confirm_unknown_returns_unknown(self):
+        kind, payload = self.cc("hello there")
+        self.assertEqual(kind, "unknown")
+        self.assertEqual(payload, "hello there")
+
+
+class TestPromptConvShortCircuit(unittest.TestCase):
+    """Gate must be conservative — only short-circuit when ALL three checks pass."""
+
+    def setUp(self):
+        from prompt_conversation import is_slot_complete, _combine_slots
+        self.is_complete = is_slot_complete
+        self.combine = _combine_slots
+
+    def test_short_text_is_not_complete(self):
+        self.assertFalse(self.is_complete("fix bug"))
+        self.assertFalse(self.is_complete(""))
+
+    def test_long_but_general_intent_is_not_complete(self):
+        # 60+ words but "general" intent and no extracted details
+        text = " ".join(["something"] * 60)
+        self.assertFalse(self.is_complete(text))
+
+    def test_long_with_intent_and_details_is_complete(self):
+        text = (
+            "I really need help to debug a tricky Python error in my Flask app where "
+            "the database connection times out after about 30 seconds and the traceback "
+            "shows a SQLAlchemy operational error related to the connection pool being "
+            "exhausted under heavy load testing scenarios that we have been running."
+        )
+        self.assertGreater(len(text.split()), 40)
+        self.assertTrue(self.is_complete(text))
+
+    def test_combine_slots_omits_empty(self):
+        out = self.combine("write a function", "", "")
+        self.assertEqual(out, "write a function.")
+        out = self.combine("write a function", "for an interview", "one example")
+        self.assertIn("Additional context: for an interview", out)
+        self.assertIn("Desired format: one example", out)
+
+    def test_combine_slots_all_empty(self):
+        self.assertEqual(self.combine("", "", ""), "")
+
+
+# ============================================================
+# Prompt Assist v2 — full state-machine run paths
+# ============================================================
+
+class TestPromptConvStateMachine(unittest.TestCase):
+    """Drive run_conversation() end-to-end with mocked TTS / recorder / preview / paste."""
+
+    def setUp(self):
+        import prompt_conversation as pc
+        self.pc = pc
+        self.spoken = []
+        self.pasted = []
+
+    def _speak(self, text):
+        self.spoken.append(text)
+
+    def _paste(self, text):
+        self.pasted.append(text)
+
+    def _make_record(self, slot_answers):
+        def record(slot_name, _config):
+            return slot_answers.get(slot_name, "")
+        return record
+
+    def _preview_clicks(self, key, payload=""):
+        def preview(_prompt, callbacks):
+            cb = callbacks.get(key)
+            if cb:
+                cb(payload) if key == "on_add" else cb()
+        return preview
+
+    def test_happy_path_2_slots_then_send(self):
+        record = self._make_record({
+            "task": "write a Python function that reverses a string",
+            "context": "for a coding interview",
+        })
+        snap = self.pc.run_conversation(
+            {}, tts_speak=self._speak, record_slot=record,
+            show_preview=self._preview_clicks("on_confirm"), paste_text=self._paste,
+        )
+        self.assertEqual(snap["final_state"], self.pc.S_DONE)
+        self.assertFalse(snap["cancelled"])
+        self.assertEqual(len(self.pasted), 1)
+        self.assertIn("reverses a string", self.pasted[0])
+        # Spoke opener + 1 slot question (context) + 1 confirm summary = 3
+        # Format slot dropped 2026-04-24 — confused non-technical users.
+        self.assertEqual(len(self.spoken), 3)
+
+    def test_cancel_at_task_slot(self):
+        record = self._make_record({"task": "cancel"})
+        snap = self.pc.run_conversation(
+            {}, tts_speak=self._speak, record_slot=record,
+            show_preview=self._preview_clicks("on_confirm"), paste_text=self._paste,
+        )
+        self.assertEqual(snap["final_state"], self.pc.S_CANCELLED)
+        self.assertTrue(snap["cancelled"])
+        self.assertEqual(self.pasted, [])
+
+    def test_cancel_at_context_slot(self):
+        record = self._make_record({"task": "write a script", "context": "never mind"})
+        snap = self.pc.run_conversation(
+            {}, tts_speak=self._speak, record_slot=record,
+            show_preview=self._preview_clicks("on_confirm"), paste_text=self._paste,
+        )
+        self.assertEqual(snap["final_state"], self.pc.S_CANCELLED)
+
+    def test_short_circuit_skips_slots_2_and_3(self):
+        long = (
+            "I really need help to debug a tricky Python error in my Flask app where "
+            "the database connection times out after about 30 seconds and the traceback "
+            "shows a SQLAlchemy operational error related to the connection pool being "
+            "exhausted under heavy load testing scenarios that we have been running."
+        )
+        called_for = []
+
+        def record(slot_name, _config):
+            called_for.append(slot_name)
+            if slot_name == "task":
+                return long
+            raise AssertionError(f"slot {slot_name} should not be asked on short-circuit")
+
+        snap = self.pc.run_conversation(
+            {}, tts_speak=self._speak, record_slot=record,
+            show_preview=self._preview_clicks("on_confirm"), paste_text=self._paste,
+        )
+        self.assertEqual(snap["final_state"], self.pc.S_DONE)
+        self.assertEqual(called_for, ["task"])
+        self.assertEqual(snap["slots"]["context"], "")
+        self.assertEqual(snap["slots"]["format"], "")
+
+    def test_confirmation_timeout_cancels(self):
+        import prompt_conversation as pc
+        pc.CONFIRM_TIMEOUT_S, original = 0.2, pc.CONFIRM_TIMEOUT_S
+        try:
+            record = self._make_record({"task": "x", "context": "", "format": ""})
+            snap = pc.run_conversation(
+                {}, tts_speak=self._speak, record_slot=record,
+                show_preview=lambda _p, _c: None,  # never fires
+                paste_text=self._paste,
+            )
+            self.assertEqual(snap["final_state"], pc.S_CANCELLED)
+            self.assertEqual(self.pasted, [])
+        finally:
+            pc.CONFIRM_TIMEOUT_S = original
+
+    def test_add_appends_payload_then_pastes(self):
+        record = self._make_record({"task": "write a function", "context": "", "format": ""})
+        snap = self.pc.run_conversation(
+            {}, tts_speak=self._speak, record_slot=record,
+            show_preview=self._preview_clicks("on_add", "keep it under twenty lines"),
+            paste_text=self._paste,
+        )
+        self.assertEqual(snap["final_state"], self.pc.S_DONE)
+        self.assertIn("twenty lines", snap["raw"].lower())
+        self.assertEqual(len(self.pasted), 1)
+
+    def test_explicit_cancel_at_confirm(self):
+        record = self._make_record({"task": "x", "context": "", "format": ""})
+        snap = self.pc.run_conversation(
+            {}, tts_speak=self._speak, record_slot=record,
+            show_preview=self._preview_clicks("on_cancel"), paste_text=self._paste,
+        )
+        self.assertEqual(snap["final_state"], self.pc.S_CANCELLED)
+        self.assertEqual(self.pasted, [])
+
+    def test_opener_overridable_via_config(self):
+        record = self._make_record({"task": "cancel"})
+        cfg = {"prompt_assist": {"opener": "Hey, what do you need?"}}
+        self.pc.run_conversation(
+            cfg, tts_speak=self._speak, record_slot=record,
+            show_preview=self._preview_clicks("on_confirm"), paste_text=self._paste,
+        )
+        self.assertEqual(self.spoken[0], "Hey, what do you need?")
+
+
+# ============================================================
+# Prompt Assist v2 — voice-driven confirmation
+# ============================================================
+
+class TestPromptConvVoiceConfirm(unittest.TestCase):
+    """Voice listener during CONFIRMING routes through the same callbacks as
+    the overlay buttons; whichever fires first wins."""
+
+    def setUp(self):
+        import prompt_conversation as pc
+        self.pc = pc
+        self.spoken = []
+        self.pasted = []
+
+    def _speak(self, text):
+        self.spoken.append(text)
+
+    def _paste(self, text):
+        self.pasted.append(text)
+
+    def _make_record(self, slot_answers):
+        def record(slot_name, _config):
+            return slot_answers.get(slot_name, "")
+        return record
+
+    def _silent_preview(self):
+        """Overlay that opens but never fires a button — voice must win."""
+        def preview(_prompt, _callbacks):
+            pass
+        return preview
+
+    def _never_voice(self):
+        """Voice listener that returns empty — button must win."""
+        calls = {"n": 0}
+        def rec(_config, *, cancel_event=None, max_seconds=6.0):
+            calls["n"] += 1
+            return ""
+        return rec, calls
+
+    def _slot_record(self):
+        return self._make_record({
+            "task": "write a Python function that reverses a string",
+            "context": "for a coding interview",
+            "format": "one short example",
+        })
+
+    def test_voice_send_routes_to_paste(self):
+        def voice_rec(_config, *, cancel_event=None, max_seconds=6.0):
+            return "send"
+        snap = self.pc.run_conversation(
+            {},
+            tts_speak=self._speak,
+            record_slot=self._slot_record(),
+            record_confirm_voice=voice_rec,
+            show_preview=self._silent_preview(),
+            paste_text=self._paste,
+        )
+        self.assertEqual(snap["final_state"], self.pc.S_DONE)
+        self.assertEqual(len(self.pasted), 1)
+        self.assertIn("reverses a string", self.pasted[0])
+
+    def test_voice_cancel_aborts(self):
+        def voice_rec(_config, *, cancel_event=None, max_seconds=6.0):
+            return "never mind"
+        snap = self.pc.run_conversation(
+            {},
+            tts_speak=self._speak,
+            record_slot=self._slot_record(),
+            record_confirm_voice=voice_rec,
+            show_preview=self._silent_preview(),
+            paste_text=self._paste,
+        )
+        self.assertEqual(snap["final_state"], self.pc.S_CANCELLED)
+        self.assertEqual(self.pasted, [])
+
+    def test_voice_add_appends_payload(self):
+        def voice_rec(_config, *, cancel_event=None, max_seconds=6.0):
+            return "add keep it under twenty lines"
+        snap = self.pc.run_conversation(
+            {},
+            tts_speak=self._speak,
+            record_slot=self._slot_record(),
+            record_confirm_voice=voice_rec,
+            show_preview=self._silent_preview(),
+            paste_text=self._paste,
+        )
+        self.assertEqual(snap["final_state"], self.pc.S_DONE)
+        self.assertIn("twenty lines", snap["raw"].lower())
+        self.assertEqual(len(self.pasted), 1)
+
+    def test_voice_refine_forces_llm_path(self):
+        # With llm_refine off in config, the 'refine' voice command should still
+        # fire the callback and advance to paste (the LLM call inside refine_prompt
+        # is a no-op when llm_refine stays False, but the routing succeeds).
+        def voice_rec(_config, *, cancel_event=None, max_seconds=6.0):
+            return "refine"
+        snap = self.pc.run_conversation(
+            {},
+            tts_speak=self._speak,
+            record_slot=self._slot_record(),
+            record_confirm_voice=voice_rec,
+            show_preview=self._silent_preview(),
+            paste_text=self._paste,
+        )
+        self.assertEqual(snap["final_state"], self.pc.S_DONE)
+        self.assertEqual(len(self.pasted), 1)
+
+    def test_unknown_voice_falls_through_to_button(self):
+        """Voice returns ambiguous text 3x; button then fires and wins."""
+        call_log = {"voice": 0}
+
+        def voice_rec(_config, *, cancel_event=None, max_seconds=6.0):
+            call_log["voice"] += 1
+            return "hmm"  # classifies as 'unknown'
+
+        def button_preview(_prompt, callbacks):
+            # Fire the send callback after a short delay so voice gets a chance first.
+            import threading as _t, time as _tt
+            def _click():
+                _tt.sleep(0.1)
+                cb = callbacks.get("on_confirm")
+                if cb:
+                    cb()
+            _t.Thread(target=_click, daemon=True).start()
+
+        snap = self.pc.run_conversation(
+            {},
+            tts_speak=self._speak,
+            record_slot=self._slot_record(),
+            record_confirm_voice=voice_rec,
+            show_preview=button_preview,
+            paste_text=self._paste,
+        )
+        self.assertEqual(snap["final_state"], self.pc.S_DONE)
+        # Voice listener capped at 3 attempts on pure 'unknown' stream
+        self.assertLessEqual(call_log["voice"], 3)
+        self.assertEqual(len(self.pasted), 1)
+
+    def test_button_click_sets_voice_cancel_event(self):
+        """When the overlay button fires, the voice listener's cancel_event
+        should be set so slot_record breaks out of its poll loop."""
+        captured_event = {"evt": None}
+        voice_seen_cancel = {"v": False}
+
+        def voice_rec(_config, *, cancel_event=None, max_seconds=6.0):
+            captured_event["evt"] = cancel_event
+            # Simulate a slow recorder that checks cancel_event once per loop
+            import time as _t
+            for _ in range(20):
+                _t.sleep(0.01)
+                if cancel_event is not None and cancel_event.is_set():
+                    voice_seen_cancel["v"] = True
+                    return ""
+            return ""
+
+        def button_preview(_prompt, callbacks):
+            import threading as _t, time as _tt
+            def _click():
+                _tt.sleep(0.05)
+                cb = callbacks.get("on_confirm")
+                if cb:
+                    cb()
+            _t.Thread(target=_click, daemon=True).start()
+
+        snap = self.pc.run_conversation(
+            {},
+            tts_speak=self._speak,
+            record_slot=self._slot_record(),
+            record_confirm_voice=voice_rec,
+            show_preview=button_preview,
+            paste_text=self._paste,
+        )
+        self.assertEqual(snap["final_state"], self.pc.S_DONE)
+        self.assertIsNotNone(captured_event["evt"])
+        self.assertTrue(voice_seen_cancel["v"])
+
+    def test_explain_reads_back_and_continues_listening(self):
+        """'explain' speaks the full prompt and then the listener tries again.
+        On the 2nd call, return 'send' to close the loop."""
+        responses = iter(["explain", "send"])
+
+        def voice_rec(_config, *, cancel_event=None, max_seconds=6.0):
+            try:
+                return next(responses)
+            except StopIteration:
+                return ""
+
+        snap = self.pc.run_conversation(
+            {},
+            tts_speak=self._speak,
+            record_slot=self._slot_record(),
+            record_confirm_voice=voice_rec,
+            show_preview=self._silent_preview(),
+            paste_text=self._paste,
+        )
+        self.assertEqual(snap["final_state"], self.pc.S_DONE)
+        # The assembled prompt should appear somewhere in spoken history
+        # (could be the explain read-back OR the summary — both contain text).
+        self.assertTrue(any(s and len(s) > 20 for s in self.spoken))
+        self.assertEqual(len(self.pasted), 1)
+
+
+# ============================================================
+# Active-window platform classification
+# ============================================================
+
+class TestActiveWindowClassify(unittest.TestCase):
+    def setUp(self):
+        from active_window import classify_platform
+        self.cls = classify_platform
+
+    def test_claude_desktop(self):
+        self.assertEqual(self.cls("claude.exe", ""), "claude")
+
+    def test_chatgpt_in_chrome(self):
+        self.assertEqual(self.cls("chrome.exe", "ChatGPT"), "chatgpt")
+        self.assertEqual(self.cls("msedge.exe", "ChatGPT - OpenAI"), "chatgpt")
+
+    def test_gemini_in_chrome(self):
+        self.assertEqual(self.cls("chrome.exe", "Gemini"), "gemini")
+        self.assertEqual(self.cls("chrome.exe", "Bard"), "gemini")
+
+    def test_claude_web_in_chrome(self):
+        self.assertEqual(self.cls("chrome.exe", "Claude.ai"), "claude")
+
+    def test_chatgpt_wins_over_claude_when_both_in_title(self):
+        # Stale tab title shouldn't downgrade detection
+        self.assertEqual(self.cls("chrome.exe", "ChatGPT - Claude.ai"), "chatgpt")
+
+    def test_cursor_and_vscode(self):
+        self.assertEqual(self.cls("cursor.exe", "main.py"), "cursor")
+        self.assertEqual(self.cls("code.exe", "foo.ts"), "vscode")
+
+    def test_unknown_apps_are_generic(self):
+        self.assertEqual(self.cls("notepad.exe", "untitled"), "generic")
+        self.assertEqual(self.cls("", ""), "generic")
+        # Non-browser exe with "Claude" in title shouldn't match — title-only
+        # detection is browser-scoped
+        self.assertEqual(self.cls("explorer.exe", "Claude folder"), "generic")
+
+    def test_case_insensitive(self):
+        self.assertEqual(self.cls("CHROME.EXE", "GEMINI"), "gemini")
+
+
+# ============================================================
+# Prompt Assist credentials — Windows Credential Manager roundtrip
+# ============================================================
+
+class TestSlotRecord(unittest.TestCase):
+    """Per-slot synchronous recorder — guard paths + early-exit conditions."""
+
+    def setUp(self):
+        import voice
+        self.voice = voice
+        self._orig_model = voice.model
+        self._orig_stream = voice.stream
+
+    def tearDown(self):
+        self.voice.model = self._orig_model
+        self.voice.stream = self._orig_stream
+
+    def test_returns_empty_when_model_not_loaded(self):
+        self.voice.model = None
+        # stream irrelevant; model check fires first
+        self.assertEqual(self.voice.slot_record("task", {}), "")
+
+    def test_returns_empty_when_stream_unavailable(self):
+        self.voice.model = MagicMock()
+        self.voice.stream = None
+        self.assertEqual(self.voice.slot_record("task", {}), "")
+
+    def test_returns_empty_when_stream_inactive(self):
+        self.voice.model = MagicMock()
+        fake_stream = MagicMock()
+        fake_stream.active = False
+        self.voice.stream = fake_stream
+        self.assertEqual(self.voice.slot_record("task", {}), "")
+
+    def test_silence_seconds_falls_back_to_vad_config(self):
+        # Hits max_seconds path immediately; verifies config lookup doesn't crash
+        # when vad section is missing or has unusual shape.
+        self.voice.model = MagicMock()
+        fake_stream = MagicMock(); fake_stream.active = True
+        self.voice.stream = fake_stream
+        with patch.object(self.voice, "play_start_sound"):
+            result = self.voice.slot_record("task", {"vad": {}}, max_seconds=0.05)
+        self.assertEqual(result, "")  # no audio captured in 50ms
+
+
+class TestPromptAssistCredentials(unittest.TestCase):
+    """Hits the real Windows Credential Manager. Cleans up after itself."""
+
+    PROVIDER = "test_pac_roundtrip"
+
+    def setUp(self):
+        from prompt_assist_credentials import delete_api_key
+        delete_api_key(self.PROVIDER)
+
+    def tearDown(self):
+        from prompt_assist_credentials import delete_api_key
+        delete_api_key(self.PROVIDER)
+
+    def test_save_then_get_roundtrip(self):
+        from prompt_assist_credentials import save_api_key, get_api_key
+        self.assertTrue(save_api_key(self.PROVIDER, "sk-roundtrip-xyz"))
+        self.assertEqual(get_api_key(self.PROVIDER), "sk-roundtrip-xyz")
+
+    def test_delete_removes_key(self):
+        from prompt_assist_credentials import save_api_key, get_api_key, delete_api_key
+        save_api_key(self.PROVIDER, "sk-temp")
+        self.assertTrue(delete_api_key(self.PROVIDER))
+        self.assertEqual(get_api_key(self.PROVIDER), "")
+
+    def test_get_unknown_provider_returns_empty(self):
+        from prompt_assist_credentials import get_api_key
+        self.assertEqual(get_api_key("nonexistent_provider_xyzzy"), "")
+
+    def test_save_rejects_empty_inputs(self):
+        from prompt_assist_credentials import save_api_key
+        self.assertFalse(save_api_key("", "key"))
+        self.assertFalse(save_api_key("provider", ""))
 
 
 if __name__ == "__main__":

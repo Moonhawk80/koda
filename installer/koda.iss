@@ -9,7 +9,8 @@
 ; Requires: Inno Setup 6 — https://jrsoftware.org/isdl.php
 
 #define MyAppName "Koda"
-#define MyAppVersion "4.3.1"
+#define MyAppVersion "4.4.0-beta1"
+#define MyAppVersionNumeric "4.4.0.1"
 #define MyAppPublisher "Alex Concepcion"
 #define MyAppURL "https://github.com/Moonhawk80/koda"
 #define MyAppExeName "Koda.exe"
@@ -49,9 +50,9 @@ SetupLogging=yes
 VersionInfoCompany={#MyAppPublisher}
 VersionInfoCopyright={#MyAppCopyright}
 VersionInfoDescription={#MyAppDescription}
-VersionInfoVersion={#MyAppVersion}.0
+VersionInfoVersion={#MyAppVersionNumeric}
 VersionInfoProductName={#MyAppName}
-VersionInfoProductVersion={#MyAppVersion}.0
+VersionInfoProductVersion={#MyAppVersionNumeric}
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
