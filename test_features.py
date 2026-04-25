@@ -3200,6 +3200,16 @@ class TestSlotRecord(unittest.TestCase):
             result = self.voice.slot_record("task", {"vad": {}}, max_seconds=0.05)
         self.assertEqual(result, "")  # no audio captured in 50ms
 
+    def test_rms_threshold_read_from_vad_config(self):
+        # Verifies rms_threshold lookup from config doesn't crash when vad
+        # block has the key set or is empty (falls back to 0.005 default).
+        self.voice.model = MagicMock()
+        fake_stream = MagicMock(); fake_stream.active = True
+        self.voice.stream = fake_stream
+        with patch.object(self.voice, "play_start_sound"):
+            result = self.voice.slot_record("task", {"vad": {"rms_threshold": 0.02}}, max_seconds=0.05)
+        self.assertEqual(result, "")
+
 
 class TestPromptAssistCredentials(unittest.TestCase):
     """Hits the real Windows Credential Manager. Cleans up after itself."""

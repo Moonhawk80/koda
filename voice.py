@@ -710,6 +710,7 @@ def slot_record(slot_name, config_dict, max_seconds=15.0, silence_seconds=None, 
     global _slot_recording, _slot_chunks, model, stream
     if silence_seconds is None:
         silence_seconds = config_dict.get("vad", {}).get("silence_timeout_ms", 1500) / 1000.0
+    rms_threshold = config_dict.get("vad", {}).get("rms_threshold", 0.005)
 
     # Cross-module bridge: when voice.py runs as __main__ (via start.bat or
     # PyInstaller onefile) but another module imports us via `from voice
@@ -769,7 +770,6 @@ def slot_record(slot_name, config_dict, max_seconds=15.0, silence_seconds=None, 
         start = time.time()
         last_voice = time.time()
         voice_detected = False  # gate silence-stop until at least one voice event
-        VAD_RMS_THRESHOLD = 0.005  # tuned for typical mic gain
         MIN_AUDIO_S = 0.5
 
         while True:
@@ -788,7 +788,7 @@ def slot_record(slot_name, config_dict, max_seconds=15.0, silence_seconds=None, 
                 try:
                     arr = np.concatenate(recent, axis=0).flatten()
                     rms = float(np.sqrt(np.mean(arr * arr)))
-                    if rms > VAD_RMS_THRESHOLD:
+                    if rms > rms_threshold:
                         voice_detected = True
                         last_voice = time.time()
                 except Exception:

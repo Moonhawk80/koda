@@ -59,6 +59,9 @@ DEFAULT_CONFIG = {
     "vad": {
         "enabled": True,
         "silence_timeout_ms": 1500,
+        # RMS floor that gates "user spoke". Raise for noisy rooms / music bleed
+        # so background hum doesn't trigger false voice detection in slot_record.
+        "rms_threshold": 0.005,
     },
     "wake_word": {
         "enabled": False,
