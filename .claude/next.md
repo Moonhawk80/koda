@@ -10,11 +10,27 @@
 ## Small fixes (discovered during live-test)
 
 - [ ] **Port v2 pickers to Inno Setup installer** — `configure.py` has `setup_prompt_voice` + `setup_prompt_backend` (Step 9 + Step 10 of Python wizard) but Inno installer bypasses configure.py entirely. End users never see the v2 pickers unless they manually run `venv\Scripts\python configure.py` post-install. Port to Pascal `[Code]` pages in `installer/koda.iss`.
-- [ ] **VAD tuning** — expose `VAD_RMS_THRESHOLD` (currently hardcoded 0.005 in slot_record) and silence_seconds in config. Defaults don't handle music or ambient noise; live-test session surfaced this.
-- [ ] **Template simplification follow-through** — audit code/debug/explain/review/write templates for further 2022-era boilerplate per `project_template_philosophy.md`. Removed `Context:` block + general closer this session; intent-specific scaffolding kept, but worth another pass.
-- [ ] **Clean up configure.py dual-"polish" summary** — "LLM polish" (legacy command-mode) vs "Prompt polish" (new v2 backend) are two different things; summary lists both, confusing.
+- [x] **VAD tuning** — `vad.rms_threshold` exposed to config (PR #35 commit `b0c0c38`). `silence_seconds` already config-exposed via `vad.silence_timeout_ms`. Defaults still 0.005 / 1500ms; users can tune per environment.
+- [x] **Template simplification follow-through** — verified already at correct level per `project_template_philosophy.md` (synced from work PC). Intent-specific scaffolding kept; `Context:` block + generic closer were removed session 46. No further pruning warranted.
+- [x] **Clean up configure.py dual-"polish" summary** — disambiguated to "Prompt polish (prompt-assist mode)" + "Command polish (command mode)" with both lines grouped (PR #35 commit `aeddd8e`).
 - [ ] **Re-add cancel-via-hotkey-repress for prompt-assist v2** — `cancel_slot_record` API was removed by forge-deslop (no producer); add cleanly if/when prompt_press-during-active-conversation needs to cancel.
 - [ ] **Fix `statusline-command.sh`** to render `.claude/next.md` first uncompleted item — currently only shows model + context bar.
+
+## Session 47 outputs (open for review)
+
+- [ ] **PR #35 review/merge** — silent fixes (configure.py dual-polish disambiguation + VAD `rms_threshold`). 432/432 tests. Pre-push gate clean.
+- [ ] **PR #36 review/merge** — Atlas Navy redesign (overlay v3 + settings_gui). 431/431 tests. Pre-push gate clean. Visual identity locked: navy `#1c5fb8` hero accent + 5 surface luminance layers + left-edge accent spine + paired fonts (Segoe UI Variable Display/Text + Cascadia Mono) + Polish-not-Refine rename + tooltips + K-mark dot decoupled from BRAND.
+- [ ] **Settings GUI second-pass review tomorrow** (per Alex tonight) — multiple polish gaps remaining; eyeball with fresh eyes after the marathon padding iteration.
+- [ ] **Live-eyeball Atlas Navy in REAL prompt-assist mic flow** — `dev_test_overlay.py` validated visual layer only; integration with Whisper + voice-confirm + paste still untested.
+- [ ] **Decide `dev_test_overlay.py` fate** — commit / delete / gitignore. Currently untracked at project root.
+- [ ] **Bundle Hubot Sans + JetBrains Mono** in installer for full type system (currently fallback to Win 11 Variable + Cascadia Mono — visually approved but bundling would lock identity across all Windows versions).
+
+## Session 47 — Memory sync infrastructure (DONE)
+
+- [x] **Memory git-sync repo created** — `Moonhawk80/koda-memory` (private). Work PC pushed initial 27 .md files; home PC cloned + merged 5 home-only files + reorganized MEMORY.md index + refreshed stale `project_koda.md`.
+- [x] **Auto-sync hooks installed (home PC)** — `~/.claude/settings.json` got SessionStart pull + Stop commit/push hooks. Async, log to `~/.claude/koda-memory-sync.log`.
+- [ ] **Work PC: git pull on koda-memory** to get home-PC's 5 unique files + merged MEMORY.md index. Do FIRST in next work-PC session.
+- [ ] **Work PC: install matching auto-sync hooks** — same shape as home PC but wrap git ops with `gh auth switch --user Moonhawk80 && ... && gh auth switch --user Alex-Alternative` since work PC's daily-driver gh account is Alex-Alternative.
 
 ## Runtime-test carried over
 
