@@ -85,6 +85,12 @@ Source: "..\koda.ico"; DestDir: "{app}"; Flags: ignoreversion
 ; Plugins directory (empty by default, user adds plugins here)
 Source: "..\plugins\__init__.py"; DestDir: "{app}\plugins"; Flags: ignoreversion
 
+; Power Mode celebration assets — extracted to {tmp} on demand by the
+; wizard page (not installed to {app}). dontcopy = bundled in installer
+; but only materialised via ExtractTemporaryFile when needed.
+Source: "power_banner.bmp"; Flags: dontcopy
+Source: "..\sounds\success.wav"; Flags: dontcopy
+
 [Dirs]
 ; Ensure plugins directory exists and is writable
 Name: "{app}\plugins"; Permissions: users-modify
@@ -139,15 +145,110 @@ var
   ModelPage:     TInputOptionWizardPage;
   FormulaPage:   TInputOptionWizardPage;
   { Tier-classification pages — created conditionally in InitializeWizard }
-  BlockedPage:   TOutputMsgWizardPage;
-  MinimumPage:   TOutputMsgWizardPage;
-  PowerPage:     TWizardPage;
-  DetectedTier:  String;
+  BlockedPage:           TOutputMsgWizardPage;
+  MinimumPage:           TOutputMsgWizardPage;
+  PowerPage:             TWizardPage;
+  PowerPageContinueRadio: TNewRadioButton;
+  DetectedTier:          String;
 
 { Win32 API — count audio input devices (recording devices) without }
 { needing PortAudio or any helper exe. Returns 0 when no mic is set up. }
 function waveInGetNumDevs: Cardinal;
   external 'waveInGetNumDevs@winmm.dll stdcall';
+
+{ Win32 API — fire-and-forget audio playback for the Power Mode banner.
+  mciSendStringW is the Unicode entrypoint, matching modern Inno's
+  Unicode-only PascalScript strings. Passing a null-cast Integer for
+  hwndCallback (we never want a notification posted back). }
+function mciSendString(lpszCommand, lpszReturnString: String;
+                       cchReturn, hwndCallback: Cardinal): Cardinal;
+  external 'mciSendStringW@winmm.dll stdcall';
+
+(* Read the GPU name written by system_check.iss:DetectNvidiaGpuPresent
+   into the wizard temp dir's nvidia_check.txt file. Returns "NVIDIA GPU"
+   when the file is missing or empty (defensive — the celebration page
+   should still render even if the nvidia-smi probe got cleaned up). *)
+function GetNvidiaGpuNameForDisplay: String;
+var
+  TempPath: String;
+  Lines: TStringList;
+begin
+  Result := 'NVIDIA GPU';
+  TempPath := ExpandConstant('{tmp}\nvidia_check.txt');
+  if not FileExists(TempPath) then Exit;
+  Lines := TStringList.Create;
+  try
+    Lines.LoadFromFile(TempPath);
+    if (Lines.Count > 0) and (Trim(Lines[0]) <> '') then
+      Result := Trim(Lines[0]);
+  finally
+    Lines.Free;
+  end;
+end;
+
+{ Play sounds/success.wav once. Called from CurPageChanged when the
+  Power Mode page activates — NOT from CreatePowerPageContent (which
+  runs at wizard init, far before the user reaches the page). }
+procedure PlayPowerModeSound;
+var
+  WavPath: String;
+begin
+  ExtractTemporaryFile('success.wav');
+  WavPath := ExpandConstant('{tmp}\success.wav');
+  { Close any prior alias before reopening; ignore failures. }
+  mciSendString('close kodasuccess', '', 0, 0);
+  mciSendString('open "' + WavPath + '" alias kodasuccess', '', 0, 0);
+  mciSendString('play kodasuccess', '', 0, 0);
+end;
+
+{ Compose the Power Mode celebration page — banner bitmap + GPU name
+  label + body copy + Continue/Standard radio choice. Called once from
+  InitializeWizard when DetectedTier = 'POWER'. }
+procedure CreatePowerPageContent(Page: TWizardPage);
+var
+  Banner: TBitmapImage;
+  GpuLabel, BodyLabel: TNewStaticText;
+  StandardRadio: TNewRadioButton;
+begin
+  ExtractTemporaryFile('power_banner.bmp');
+
+  Banner := TBitmapImage.Create(Page);
+  Banner.Parent := Page.Surface;
+  Banner.Left := (Page.SurfaceWidth - 600) div 2;
+  Banner.Top := 0;
+  Banner.Width := 600;
+  Banner.Height := 300;
+  Banner.Bitmap.LoadFromFile(ExpandConstant('{tmp}\power_banner.bmp'));
+
+  BodyLabel := TNewStaticText.Create(Page);
+  BodyLabel.Parent := Page.Surface;
+  BodyLabel.Caption := 'Near-instant transcription. Larger, more accurate model.';
+  BodyLabel.Left := 0;
+  BodyLabel.Top := 312;
+  BodyLabel.Width := Page.SurfaceWidth;
+  BodyLabel.AutoSize := False;
+  BodyLabel.Font.Style := [fsBold];
+
+  GpuLabel := TNewStaticText.Create(Page);
+  GpuLabel.Parent := Page.Surface;
+  GpuLabel.Caption := 'Detected: ' + GetNvidiaGpuNameForDisplay;
+  GpuLabel.Left := 0;
+  GpuLabel.Top := 334;
+  GpuLabel.Width := Page.SurfaceWidth;
+
+  PowerPageContinueRadio := TNewRadioButton.Create(Page);
+  PowerPageContinueRadio.Parent := Page.Surface;
+  PowerPageContinueRadio.Caption := 'Continue with Power Mode';
+  PowerPageContinueRadio.Top := 372;
+  PowerPageContinueRadio.Width := Page.SurfaceWidth;
+  PowerPageContinueRadio.Checked := True;
+
+  StandardRadio := TNewRadioButton.Create(Page);
+  StandardRadio.Parent := Page.Surface;
+  StandardRadio.Caption := 'Use Standard Mode instead';
+  StandardRadio.Top := 397;
+  StandardRadio.Width := Page.SurfaceWidth;
+end;
 
 procedure InitializeWizard();
 var
@@ -187,6 +288,17 @@ begin
       'You can change these settings later in Koda > Settings > ' +
       'Performance.'
     );
+  end;
+
+  { POWER — celebratory wizard page (banner + GPU label + radio choice) }
+  if DetectedTier = 'POWER' then
+  begin
+    PowerPage := CreateCustomPage(
+      wpWelcome,
+      'Power Mode Available',
+      'Your hardware just unlocked Koda''s fastest mode.'
+    );
+    CreatePowerPageContent(PowerPage);
   end;
 
   { PAGE 1 — Microphone guidance }
@@ -390,6 +502,16 @@ begin
       TierFromJson := DetectedTier;
     end;
 
+    { Honor the user's Power Mode choice — if they picked Standard Mode
+      on the celebration page, downgrade tier to RECOMMENDED before the
+      model-size dispatch below. The radio is only created when the
+      Power page itself was shown, so a nil check is required. }
+    if (PowerPageContinueRadio <> nil) and
+       (not PowerPageContinueRadio.Checked) then
+    begin
+      TierFromJson := 'RECOMMENDED';
+    end;
+
     { Hotkey mode }
     if HotkeyPage.Values[0] then
       HotkeyMode := 'hold'
@@ -431,6 +553,13 @@ begin
       SaveStringToFile(ConfigFile, ConfigContent, False);
     end;
   end;
+end;
+
+{ Play the success cue when the Power Mode page activates. }
+procedure CurPageChanged(CurPageID: Integer);
+begin
+  if (PowerPage <> nil) and (CurPageID = PowerPage.ID) then
+    PlayPowerModeSound;
 end;
 
 { Skip every page after the BLOCKED page so the user has nowhere to go but Cancel. }
