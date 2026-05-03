@@ -23,3 +23,6 @@ koda_stats.db
 .deep-review/
 .migrate-safely/
 koda_preview.png
+
+# Mirrored Whisper model snapshots downloaded at runtime (Koda models dir in dev mode)
+models/

@@ -368,6 +368,20 @@ def _discover_bundled_models(base_dir):
     )
 
 
+def _make_model_download_progress_cb(model_size):
+    """Throttle tray-title updates to ~5% increments so a 1.5 GB download
+    doesn't issue 1500 update_tray() calls."""
+    last_pct = [-5]
+    def cb(downloaded, total):
+        if total <= 0:
+            return
+        pct = int(100 * downloaded / total)
+        if pct >= last_pct[0] + 5:
+            update_tray("#3498db", f"Koda: Downloading {model_size} model... {pct}%")
+            last_pct[0] = pct
+    return cb
+
+
 def load_whisper_model():
     global model
     from faster_whisper import WhisperModel
@@ -387,11 +401,38 @@ def load_whisper_model():
     cpu_threads = int(config.get("cpu_threads", 4))
 
     def _load(m_size, dev, c_type):
+        # 1. PyInstaller-bundled snapshot (e.g. _model_small)
         b = os.path.join(base_dir, f"_model_{m_size}")
         if os.path.isdir(b):
             logger.debug("Loading bundled model from: %s", b)
             return WhisperModel(b, device=dev, compute_type=c_type, cpu_threads=cpu_threads)
-        logger.debug("Bundled model not found at %s — loading by name (may download)", b)
+
+        # 2. Previously-downloaded snapshot in CONFIG_DIR/models/<size>/
+        #    (mirrored from Moonhawk80/koda whisper-models-v1 release)
+        from model_downloader import (
+            MIRRORED_MODELS, download_and_extract, is_available, model_dir_for,
+        )
+        if is_available(m_size, CONFIG_DIR):
+            mirrored_dir = model_dir_for(m_size, CONFIG_DIR)
+            logger.debug("Loading mirrored model from: %s", mirrored_dir)
+            return WhisperModel(mirrored_dir, device=dev, compute_type=c_type, cpu_threads=cpu_threads)
+
+        # 3. Mirror exists for this size but not on disk — download it.
+        #    faster-whisper's built-in HF resolution is broken for some sizes
+        #    (e.g. large-v3-turbo), so the mirror is the authoritative source
+        #    when present.
+        if m_size in MIRRORED_MODELS:
+            logger.info("Downloading %s from Koda mirror...", m_size)
+            update_tray("#3498db", f"Koda: Downloading {m_size} model (~1.5 GB)...")
+            mirrored_dir = download_and_extract(
+                m_size, CONFIG_DIR,
+                progress_cb=_make_model_download_progress_cb(m_size),
+            )
+            update_tray("#3498db", f"Koda: Loading {m_size} model...")
+            return WhisperModel(mirrored_dir, device=dev, compute_type=c_type, cpu_threads=cpu_threads)
+
+        # 4. No bundle, no mirror — fall through to faster-whisper's HF resolution
+        logger.debug("Bundled model not found at %s — loading by name (may download from HF)", b)
         return WhisperModel(m_size, device=dev, compute_type=c_type, cpu_threads=cpu_threads)
 
     def _try_bundled_fallback(original_error):
