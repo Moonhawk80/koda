@@ -3551,5 +3551,133 @@ class TestConfigMigration(unittest.TestCase):
         self.assertEqual(loaded["system_check_mode"], "auto-detect")
 
 
+class TestModelDownloader(unittest.TestCase):
+    """Coverage for model_downloader.py — the on-demand Whisper-model
+    mirror download path used by load_whisper_model when a configured model
+    is not bundled and not cached locally. Network I/O is mocked; tests
+    exercise path construction, availability detection, the happy-path
+    extract, and the failure-path no-leftover invariant.
+    """
+
+    TEST_MODEL = "test-model-tiny"
+
+    def setUp(self):
+        self._root = tempfile.mkdtemp(prefix="koda-mdl-test-")
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self._root, ignore_errors=True)
+
+    def _build_tarball(self, files):
+        """Build an in-memory .tar.gz containing the given {name: bytes} files."""
+        import io
+        import tarfile
+        buf = io.BytesIO()
+        with tarfile.open(fileobj=buf, mode="w:gz") as tar:
+            for name, data in files.items():
+                info = tarfile.TarInfo(name=name)
+                info.size = len(data)
+                tar.addfile(info, io.BytesIO(data))
+        return buf.getvalue()
+
+    def _mock_urlopen_response(self, body_bytes):
+        """Build a mock urlopen context-manager that yields body_bytes
+        to .read(chunk_size) calls, returning b'' to signal EOF."""
+        chunk_size = 1024 * 1024
+        chunks = [body_bytes[i:i + chunk_size]
+                  for i in range(0, len(body_bytes), chunk_size)] + [b""]
+        mock = MagicMock()
+        mock.headers.get.return_value = str(len(body_bytes))
+        mock.read.side_effect = chunks
+        mock.__enter__.return_value = mock
+        mock.__exit__.return_value = False
+        return mock
+
+    def test_model_dir_for_returns_expected_path(self):
+        from model_downloader import model_dir_for
+        self.assertEqual(
+            model_dir_for("foo", "/some/root"),
+            os.path.join("/some/root", "models", "foo"),
+        )
+
+    def test_is_available_false_for_missing_dir(self):
+        from model_downloader import is_available
+        self.assertFalse(is_available(self.TEST_MODEL, self._root))
+
+    def test_is_available_false_for_partial_dir(self):
+        # Only model.bin present — config.json missing -> not available
+        from model_downloader import is_available, model_dir_for
+        target = model_dir_for(self.TEST_MODEL, self._root)
+        os.makedirs(target)
+        with open(os.path.join(target, "model.bin"), "wb") as f:
+            f.write(b"x")
+        self.assertFalse(is_available(self.TEST_MODEL, self._root))
+
+    def test_is_available_true_for_complete_dir(self):
+        from model_downloader import is_available, model_dir_for
+        target = model_dir_for(self.TEST_MODEL, self._root)
+        os.makedirs(target)
+        for name in ("model.bin", "config.json"):
+            with open(os.path.join(target, name), "wb") as f:
+                f.write(b"x")
+        self.assertTrue(is_available(self.TEST_MODEL, self._root))
+
+    def test_download_and_extract_rejects_unknown_model_size(self):
+        from model_downloader import download_and_extract
+        with self.assertRaises(ValueError):
+            download_and_extract("not-a-mirrored-model", self._root)
+
+    def test_download_and_extract_happy_path(self):
+        from model_downloader import download_and_extract, is_available
+        tarball = self._build_tarball({
+            "model.bin": b"\x00" * 32,
+            "config.json": b'{"fake": true}',
+        })
+        mock_response = self._mock_urlopen_response(tarball)
+        with patch.dict(
+            "model_downloader.MIRRORED_MODELS",
+            {self.TEST_MODEL: "https://test.invalid/test.tar.gz"},
+        ), patch("urllib.request.urlopen", return_value=mock_response):
+            target = download_and_extract(self.TEST_MODEL, self._root)
+        self.assertTrue(os.path.isdir(target))
+        self.assertTrue(os.path.isfile(os.path.join(target, "model.bin")))
+        self.assertTrue(os.path.isfile(os.path.join(target, "config.json")))
+        self.assertTrue(is_available(self.TEST_MODEL, self._root))
+
+    def test_download_and_extract_calls_progress_cb(self):
+        from model_downloader import download_and_extract
+        tarball = self._build_tarball({
+            "model.bin": b"\x00" * 32,
+            "config.json": b'{"fake": true}',
+        })
+        mock_response = self._mock_urlopen_response(tarball)
+        progress_calls = []
+
+        def cb(downloaded, total):
+            progress_calls.append((downloaded, total))
+
+        with patch.dict(
+            "model_downloader.MIRRORED_MODELS",
+            {self.TEST_MODEL: "https://test.invalid/test.tar.gz"},
+        ), patch("urllib.request.urlopen", return_value=mock_response):
+            download_and_extract(self.TEST_MODEL, self._root, progress_cb=cb)
+        self.assertGreater(len(progress_calls), 0)
+        # Final progress call must show full download
+        self.assertEqual(progress_calls[-1][0], len(tarball))
+
+    def test_download_and_extract_propagates_url_error_and_leaves_no_target(self):
+        from urllib.error import URLError
+        from model_downloader import download_and_extract, model_dir_for, is_available
+        with patch.dict(
+            "model_downloader.MIRRORED_MODELS",
+            {self.TEST_MODEL: "https://test.invalid/test.tar.gz"},
+        ), patch("urllib.request.urlopen", side_effect=URLError("network down")):
+            with self.assertRaises(URLError):
+                download_and_extract(self.TEST_MODEL, self._root)
+        # Atomic-rename invariant: no partial target dir left behind
+        self.assertFalse(os.path.isdir(model_dir_for(self.TEST_MODEL, self._root)))
+        self.assertFalse(is_available(self.TEST_MODEL, self._root))
+
+
 if __name__ == "__main__":
     unittest.main()
