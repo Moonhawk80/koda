@@ -28,7 +28,7 @@ See memory file for session-by-session state: `C:\Users\alexi\.claude\projects\C
 
 Before opening a pull request or pushing any code change to GitHub:
 
-1. Verify Skill Forge is current: `bash ~/Cortex/Projects/skillforge/scripts/check-updates.sh`. Exit 0 = proceed. Non-zero = resolve before continuing (install it, pull, or clean your local tree — the script tells you which). If the script is missing, Skill Forge isn't installed — install it first per `~/Cortex/Projects/afg-hq/CLAUDE.md`.
+1. Verify Skill Forge is current: `bash ~/Cortex/Projects/skillforge/scripts/check-updates.sh`. Exit 0 = proceed. Non-zero = resolve before continuing (install it, pull, or clean your local tree — the script tells you which). If the script is missing, Skill Forge isn't installed — see `~/Cortex/Projects/skillforge/README.md`.
 2. Run `/forge-deslop` on the diff. Approve the hygiene fixes it proposes.
 3. Run `/forge-review` on the diff. Resolve any BLOCKING or NEEDS-FIX findings.
 4. Only then push.
